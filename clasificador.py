@@ -3,16 +3,19 @@ import sys
 import shutil
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QLabel, QLineEdit, QCompleter, QMessageBox)
-from PyQt5.QtCore import Qt, QSize, QRect
+from PyQt5.QtCore import Qt, QSize, QRect, pyqtSignal
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor
 from PIL import Image
 from pathlib import Path
 
 class AutoCompleteLineEdit(QLineEdit):
+    nextImageSignal = pyqtSignal()  # Nueva señal para siguiente imagen
+    
     def __init__(self, completevalues, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._completer = None
         self._suggestion = ""
+        self.last_category = ""  # Para almacenar la última categoría
         self.textChanged.connect(self.updateSuggestion)
         self.setCompleter(completevalues)
 
@@ -41,12 +44,22 @@ class AutoCompleteLineEdit(QLineEdit):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Tab:
+            if self.last_category:  # Si hay una categoría anterior, usarla
+                self.setText(self.last_category)
+                self.setCursorPosition(len(self.last_category))
+                event.accept()
+                return
+            # Si no hay categoría anterior, usar la sugerencia como antes
             current_text = self.text()
             if self._suggestion and len(self._suggestion) > len(current_text):
                 self.setText(self._suggestion)
                 self.setCursorPosition(len(self._suggestion))
                 event.accept()
                 return
+        elif event.key() == Qt.Key_Control:
+            self.nextImageSignal.emit()  # Emitir señal para siguiente imagen
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def focusNextPrevChild(self, next):
@@ -205,6 +218,7 @@ class ClasificadorImagenes(QMainWindow):
         # Campo de entrada con autocompletado
         self.entrada = AutoCompleteLineEdit(self.categorias)
         self.entrada.returnPressed.connect(self.procesar_clasificacion)
+        self.entrada.nextImageSignal.connect(self.siguiente_imagen)  # Conectar la señal
         input_layout.addWidget(self.entrada)
         
         layout.addLayout(input_layout)
@@ -267,6 +281,27 @@ class ClasificadorImagenes(QMainWindow):
 
         self.clasificar_imagen(categoria)
 
+    def siguiente_imagen(self):
+        """Mueve la imagen actual a la carpeta skip y avanza a la siguiente"""
+        if self.imagen_actual_index >= len(self.imagenes):
+            return
+
+        imagen_actual = self.imagenes[self.imagen_actual_index]
+        
+        # Crear directorio skip si no existe
+        skip_dir = "skip"
+        Path(skip_dir).mkdir(exist_ok=True)
+
+        # Mover imagen a la carpeta skip
+        try:
+            shutil.move(imagen_actual, os.path.join(skip_dir, imagen_actual))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error al mover la imagen a skip: {str(e)}")
+            return
+
+        self.imagen_actual_index += 1
+        self.mostrar_imagen_actual()
+
     def clasificar_imagen(self, categoria):
         if self.imagen_actual_index >= len(self.imagenes):
             return
@@ -279,6 +314,8 @@ class ClasificadorImagenes(QMainWindow):
         # Mover imagen
         try:
             shutil.move(imagen_actual, os.path.join(categoria, imagen_actual))
+            # Guardar la última categoría usada
+            self.entrada.last_category = categoria
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al mover la imagen: {str(e)}")
             return
