@@ -98,7 +98,7 @@ class ImageLabel(QLabel):
         self.bbox = None
         self.original_size = None
         self.setAlignment(Qt.AlignCenter)
-        self.setMinimumSize(QSize(400, 300))  # Set minimum size for better layout
+        self.setMinimumSize(QSize(600, 450))  # Tamaño mínimo más grande para las imágenes
 
     def set_bbox(self, bbox, original_size):
         self.bbox = bbox
@@ -146,7 +146,11 @@ class ClasificadorImagenes(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Clasificador de Imágenes")
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 1200, 800)  # Ventana más grande
+        # Hacer que la ventana tenga un tamaño fijo
+        self.setFixedSize(1200, 800)  # Ventana más grande
+        # Deshabilitar el botón de maximizar
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
 
         # Cargar categorías
         self.categorias = self.cargar_categorias()
@@ -281,7 +285,7 @@ class ClasificadorImagenes(QMainWindow):
         original_size = imagen.size
 
         # Redimensionar imagen manteniendo proporción
-        display_size = (400, 300)  # Tamaño reducido para acomodar ambas imágenes
+        display_size = (600, 450)  # Tamaño más grande para las imágenes
         imagen.thumbnail(display_size, Image.LANCZOS)
         
         # Convertir imagen de PIL a QPixmap
