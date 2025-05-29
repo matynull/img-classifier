@@ -16,7 +16,6 @@ class AutoCompleteLineEdit(QLineEdit):
         self._completer = None
         self._suggestion = ""
         self._last_category = ""  # Variable privada para la última categoría
-        self._suppress_suggestion = False  # Nueva variable para controlar sugerencias
         self.textChanged.connect(self.updateSuggestion)
         self.setCompleter(completevalues)
 
@@ -28,18 +27,30 @@ class AutoCompleteLineEdit(QLineEdit):
     def last_category(self, value):
         if value:  # Solo guardar si no está vacío
             self._last_category = value
+            self.setPlaceholderText(value)  # Actualizar el placeholder
 
-    def setText(self, text):
-        """Sobreescribir setText para controlar cuándo mostrar sugerencias"""
-        self._suppress_suggestion = True
-        super().setText(text)
-        self._suppress_suggestion = False
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            # Si el campo está vacío, usar el placeholder
+            if not self.text() and self.placeholderText():
+                self.setText(self.placeholderText())
+            event.accept()
+        elif event.key() == Qt.Key_Control:
+            self.nextImageSignal.emit()  # Emitir señal para siguiente imagen
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def setCompleter(self, completevalues):
+        completer = QCompleter(completevalues)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        self._completer = completer
+        super().setCompleter(completer)
 
     def updateSuggestion(self, text):
         """Busca la mejor sugerencia que empiece con el texto actual."""
-        if self._suppress_suggestion:
-            return
-            
         self._suggestion = ""
         if self._completer is not None and text:
             model = self._completer.completionModel()
@@ -52,31 +63,22 @@ class AutoCompleteLineEdit(QLineEdit):
                         break
         self.update()
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Tab:
-            if self._last_category:  # Si hay una categoría anterior, usarla
-                self._suppress_suggestion = True
-                self.setText(self._last_category)
-                self.setCursorPosition(len(self._last_category))
-                self._suppress_suggestion = False
-                event.accept()
-                return
-            # Si no hay categoría anterior, usar la sugerencia como antes
-            current_text = self.text()
-            if self._suggestion and len(self._suggestion) > len(current_text):
-                self.setText(self._suggestion)
-                self.setCursorPosition(len(self._suggestion))
-                event.accept()
-                return
-        elif event.key() == Qt.Key_Control:
-            self.nextImageSignal.emit()  # Emitir señal para siguiente imagen
-            event.accept()
-            return
-        super().keyPressEvent(event)
+    def clear(self):
+        """Sobreescribir clear para asegurar que el texto se limpia completamente"""
+        super().clear()
+        self.setText("")  # Forzar texto vacío
+        
+    def setText(self, text):
+        """Sobreescribir setText para controlar el texto inicial"""
+        if not text:  # Si el texto es vacío, asegurarse de que realmente esté vacío
+            super().clear()
+            super().setText("")
+        else:
+            super().setText(text)
 
     def paintEvent(self, event):
         super().paintEvent(event)
-        if not self._suppress_suggestion and self._suggestion and self.text() and len(self._suggestion) > len(self.text()):
+        if self._suggestion and self.text() and len(self._suggestion) > len(self.text()):
             # Calcular el ancho del texto actual
             fm = self.fontMetrics()
             text_width = fm.width(self.text())
@@ -89,17 +91,6 @@ class AutoCompleteLineEdit(QLineEdit):
             # Dibujar la parte de la sugerencia que falta
             remaining = self._suggestion[len(self.text()):]
             painter.drawText(x, y, remaining)
-
-    def setCompleter(self, completevalues):
-        completer = QCompleter(completevalues)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        self._completer = completer
-        super().setCompleter(completer)
-
-    def focusNextPrevChild(self, next):
-        return False
 
 class ImageLabel(QLabel):
     def __init__(self, parent=None):
@@ -269,6 +260,12 @@ class ClasificadorImagenes(QMainWindow):
             self.close()
             return
 
+        # Limpiar el campo de entrada ANTES de cualquier otra operación
+        self.entrada.blockSignals(True)
+        self.entrada.clear()
+        self.entrada.setText("")  # Forzar texto vacío
+        self.entrada.blockSignals(False)
+
         # Actualizar etiqueta de progreso
         self.label_progreso.setText(
             f"Imagen {self.imagen_actual_index + 1} de {len(self.imagenes)}"
@@ -328,9 +325,7 @@ class ClasificadorImagenes(QMainWindow):
         
         os.remove(imagen_path_temp)
         
-        # Mostrar la última categoría usada en el input y dar foco
-        if self.entrada.last_category:
-            self.entrada.setText(self.entrada.last_category)
+        # Dar foco al campo de entrada
         self.entrada.setFocus()
 
     def procesar_clasificacion(self):
@@ -400,6 +395,11 @@ class ClasificadorImagenes(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al mover la imagen: {str(e)}")
             return
+
+        # Asegurarse de que el input esté vacío antes de pasar a la siguiente imagen
+        self.entrada.blockSignals(True)  # Bloquear señales temporalmente
+        self.entrada.clear()  # Limpiar el texto
+        self.entrada.blockSignals(False)  # Restaurar señales
 
         self.imagen_actual_index += 1
         self.mostrar_imagen_actual()
