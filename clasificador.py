@@ -15,25 +15,35 @@ class AutoCompleteLineEdit(QLineEdit):
         super().__init__(*args, **kwargs)
         self._completer = None
         self._suggestion = ""
-        self.last_category = ""  # Para almacenar la última categoría
+        self._last_category = ""  # Variable privada para la última categoría
+        self._suppress_suggestion = False  # Nueva variable para controlar sugerencias
         self.textChanged.connect(self.updateSuggestion)
         self.setCompleter(completevalues)
 
-    def setCompleter(self, completevalues):
-        completer = QCompleter(completevalues)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        self._completer = completer
-        super().setCompleter(completer)
+    @property
+    def last_category(self):
+        return self._last_category
+
+    @last_category.setter
+    def last_category(self, value):
+        if value:  # Solo guardar si no está vacío
+            self._last_category = value
+
+    def setText(self, text):
+        """Sobreescribir setText para controlar cuándo mostrar sugerencias"""
+        self._suppress_suggestion = True
+        super().setText(text)
+        self._suppress_suggestion = False
 
     def updateSuggestion(self, text):
         """Busca la mejor sugerencia que empiece con el texto actual."""
+        if self._suppress_suggestion:
+            return
+            
         self._suggestion = ""
         if self._completer is not None and text:
             model = self._completer.completionModel()
             if model:
-                # Se busca la primera coincidencia que empiece con el texto (sin distinguir mayúsculas)
                 for row in range(model.rowCount()):
                     idx = model.index(row, 0)
                     candidate = model.data(idx)
@@ -44,9 +54,11 @@ class AutoCompleteLineEdit(QLineEdit):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Tab:
-            if self.last_category:  # Si hay una categoría anterior, usarla
-                self.setText(self.last_category)
-                self.setCursorPosition(len(self.last_category))
+            if self._last_category:  # Si hay una categoría anterior, usarla
+                self._suppress_suggestion = True
+                self.setText(self._last_category)
+                self.setCursorPosition(len(self._last_category))
+                self._suppress_suggestion = False
                 event.accept()
                 return
             # Si no hay categoría anterior, usar la sugerencia como antes
@@ -62,12 +74,9 @@ class AutoCompleteLineEdit(QLineEdit):
             return
         super().keyPressEvent(event)
 
-    def focusNextPrevChild(self, next):
-        return False
-
     def paintEvent(self, event):
         super().paintEvent(event)
-        if self._suggestion and self.text() and len(self._suggestion) > len(self.text()):
+        if not self._suppress_suggestion and self._suggestion and self.text() and len(self._suggestion) > len(self.text()):
             # Calcular el ancho del texto actual
             fm = self.fontMetrics()
             text_width = fm.width(self.text())
@@ -81,12 +90,24 @@ class AutoCompleteLineEdit(QLineEdit):
             remaining = self._suggestion[len(self.text()):]
             painter.drawText(x, y, remaining)
 
+    def setCompleter(self, completevalues):
+        completer = QCompleter(completevalues)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        self._completer = completer
+        super().setCompleter(completer)
+
+    def focusNextPrevChild(self, next):
+        return False
+
 class ImageLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.bbox = None
         self.original_size = None
         self.setAlignment(Qt.AlignCenter)
+        self.setMinimumSize(QSize(400, 300))  # Set minimum size for better layout
 
     def set_bbox(self, bbox, original_size):
         self.bbox = bbox
@@ -205,9 +226,18 @@ class ClasificadorImagenes(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # Label para la imagen
+        # Layout horizontal para las imágenes
+        images_layout = QHBoxLayout()
+
+        # Label para la imagen original
         self.label_imagen = ImageLabel()
-        layout.addWidget(self.label_imagen)
+        images_layout.addWidget(self.label_imagen)
+
+        # Label para la imagen con zoom
+        self.label_zoom = ImageLabel()
+        images_layout.addWidget(self.label_zoom)
+
+        layout.addLayout(images_layout)
 
         # Layout horizontal para la entrada
         input_layout = QHBoxLayout()
@@ -218,7 +248,7 @@ class ClasificadorImagenes(QMainWindow):
         # Campo de entrada con autocompletado
         self.entrada = AutoCompleteLineEdit(self.categorias)
         self.entrada.returnPressed.connect(self.procesar_clasificacion)
-        self.entrada.nextImageSignal.connect(self.siguiente_imagen)  # Conectar la señal
+        self.entrada.nextImageSignal.connect(self.siguiente_imagen)
         input_layout.addWidget(self.entrada)
         
         layout.addLayout(input_layout)
@@ -227,6 +257,11 @@ class ClasificadorImagenes(QMainWindow):
         self.label_progreso = QLabel()
         self.label_progreso.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label_progreso)
+
+        # Label para el nombre de la imagen
+        self.label_nombre_imagen = QLabel()
+        self.label_nombre_imagen.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.label_nombre_imagen)
 
     def mostrar_imagen_actual(self):
         if self.imagen_actual_index >= len(self.imagenes):
@@ -241,33 +276,61 @@ class ClasificadorImagenes(QMainWindow):
 
         # Cargar y mostrar imagen
         imagen_path = self.imagenes[self.imagen_actual_index]
+        # Mostrar el nombre de la imagen
+        self.label_nombre_imagen.setText(imagen_path)
         imagen = Image.open(imagen_path)
         
         # Guardar tamaño original
         original_size = imagen.size
 
         # Redimensionar imagen manteniendo proporción
-        display_size = (700, 400)
+        display_size = (400, 300)  # Tamaño reducido para acomodar ambas imágenes
         imagen.thumbnail(display_size, Image.LANCZOS)
         
         # Convertir imagen de PIL a QPixmap
         imagen_path_temp = "temp_image.png"
         imagen.save(imagen_path_temp)
         pixmap = QPixmap(imagen_path_temp)
-        os.remove(imagen_path_temp)
         
-        # Mostrar imagen
+        # Mostrar imagen original
         self.label_imagen.setPixmap(pixmap)
         
         # Establecer bounding box si existe
         if imagen_path in self.bboxes:
-            self.label_imagen.set_bbox(self.bboxes[imagen_path], original_size)
+            bbox = self.bboxes[imagen_path]
+            self.label_imagen.set_bbox(bbox, original_size)
+            
+            # Crear imagen recortada para el zoom
+            imagen_original = Image.open(imagen_path)
+            x1, x2, y1, y2 = bbox
+            # Añadir un margen del 10% alrededor del bbox
+            margin_x = int((x2 - x1) * 0.1)
+            margin_y = int((y2 - y1) * 0.1)
+            crop_x1 = max(0, x1 - margin_x)
+            crop_x2 = min(imagen_original.size[0], x2 + margin_x)
+            crop_y1 = max(0, y1 - margin_y)
+            crop_y2 = min(imagen_original.size[1], y2 + margin_y)
+            
+            imagen_recortada = imagen_original.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+            imagen_recortada.thumbnail(display_size, Image.LANCZOS)
+            
+            # Guardar y mostrar imagen recortada
+            imagen_recortada.save("temp_zoom.png")
+            pixmap_zoom = QPixmap("temp_zoom.png")
+            self.label_zoom.setPixmap(pixmap_zoom)
+            
+            # Limpiar archivos temporales
+            os.remove("temp_zoom.png")
         else:
             QMessageBox.warning(self, "Advertencia", f"No se encontró bounding box para la imagen: {imagen_path}")
             self.label_imagen.set_bbox(None, None)
+            self.label_zoom.setPixmap(QPixmap())  # Limpiar imagen de zoom
         
-        # Limpiar y dar foco a la entrada
-        self.entrada.clear()
+        os.remove(imagen_path_temp)
+        
+        # Mostrar la última categoría usada en el input y dar foco
+        if self.entrada.last_category:
+            self.entrada.setText(self.entrada.last_category)
         self.entrada.setFocus()
 
     def procesar_clasificacion(self):
@@ -279,6 +342,8 @@ class ClasificadorImagenes(QMainWindow):
             QMessageBox.warning(self, "Error", "Categoría no válida")
             return
 
+        # Guardar la categoría antes de clasificar
+        self.entrada.last_category = categoria
         self.clasificar_imagen(categoria)
 
     def siguiente_imagen(self):
@@ -311,11 +376,27 @@ class ClasificadorImagenes(QMainWindow):
         # Crear directorio si no existe
         Path(categoria).mkdir(exist_ok=True)
 
+        # Guardar la última categoría usada antes de cualquier operación
+        self.entrada.last_category = categoria
+
         # Mover imagen
         try:
+            # Obtener bbox de la imagen antes de moverla
+            bbox_info = None
+            if imagen_actual in self.bboxes:
+                bbox_info = self.bboxes[imagen_actual]
+
+            # Mover la imagen
             shutil.move(imagen_actual, os.path.join(categoria, imagen_actual))
-            # Guardar la última categoría usada
-            self.entrada.last_category = categoria
+            
+            # Si hay información de bbox, guardarla en el archivo bbox de la categoría
+            if bbox_info:
+                bbox_path = os.path.join(categoria, 'bbox.txt')
+                with open(bbox_path, 'a', encoding='utf-8') as f:
+                    # Escribir en el mismo formato que el archivo bbox original
+                    x1, x2, y1, y2 = bbox_info
+                    f.write(f"{imagen_actual} {categoria} {x1} {x2} {y1} {y2}\n")
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al mover la imagen: {str(e)}")
             return
