@@ -1,6 +1,21 @@
 # Clasificador de Imágenes
 
-Este script permite clasificar imágenes manualmente mostrándolas una por una y permitiendo al usuario asignarlas a diferentes categorías.
+Este software está diseñado para facilitar la clasificación manual de imágenes, con el propósito específico de generar conjuntos de datos de entrenamiento para redes neuronales convolucionales (CNN). La herramienta permite una clasificación rápida y eficiente de imágenes, manteniendo la información de bounding boxes y organizando automáticamente las imágenes en categorías.
+
+## Propósito
+
+El objetivo principal de este software es:
+- Generar datasets de entrenamiento para redes neuronales convolucionales
+- Mantener la integridad de los bounding boxes durante la clasificación
+- Facilitar la organización de imágenes en categorías específicas
+- Agilizar el proceso de etiquetado manual de imágenes
+
+## Desarrollo
+
+Este software fue desarrollado utilizando:
+- Python 3.x con PyQt5 para la interfaz gráfica
+- Cursor IDE para el desarrollo y optimización del código
+- Diseño enfocado en la eficiencia y facilidad de uso
 
 ## Requisitos
 
@@ -50,6 +65,13 @@ python clasificador.py
    - La información de bounding box se preservará en un archivo bbox.txt dentro de cada carpeta de categoría
 
 5. El proceso continúa hasta clasificar todas las imágenes.
+
+## Características Técnicas
+
+- Interfaz adaptativa que se ajusta a diferentes resoluciones de pantalla (720p, 1080p, 2K+)
+- Preservación automática de metadatos de bounding boxes
+- Sistema de autocompletado para categorías
+- Visualización de zoom automático en áreas de interés
 
 ## Notas
 

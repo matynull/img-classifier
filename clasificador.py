@@ -93,12 +93,12 @@ class AutoCompleteLineEdit(QLineEdit):
             painter.drawText(x, y, remaining)
 
 class ImageLabel(QLabel):
-    def __init__(self, parent=None):
+    def __init__(self, size, parent=None):
         super().__init__(parent)
         self.bbox = None
         self.original_size = None
         self.setAlignment(Qt.AlignCenter)
-        self.setMinimumSize(QSize(600, 450))  # Tamaño mínimo más grande para las imágenes
+        self.setMinimumSize(QSize(size[0], size[1]))  # Usar el tamaño pasado como parámetro
 
     def set_bbox(self, bbox, original_size):
         self.bbox = bbox
@@ -146,10 +146,35 @@ class ClasificadorImagenes(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Clasificador de Imágenes")
-        self.setGeometry(100, 100, 1200, 800)  # Ventana más grande
-        # Hacer que la ventana tenga un tamaño fijo
-        self.setFixedSize(1200, 800)  # Ventana más grande
-        # Deshabilitar el botón de maximizar
+        
+        # Obtener la resolución de la pantalla
+        screen = QApplication.primaryScreen()
+        screen_size = screen.size()
+        screen_height = screen_size.height()
+
+        # Ajustar tamaños según la resolución
+        # Para 720p (1280x720)
+        if screen_height <= 720:
+            self.window_width = 1100
+            self.window_height = 680
+            self.container_width = 500
+            self.image_size = (500, 380)
+        # Para 1080p (1920x1080)
+        elif screen_height <= 1080:
+            self.window_width = 1400
+            self.window_height = 900
+            self.container_width = 650
+            self.image_size = (650, 500)
+        # Para 2K (2560x1440) o superior
+        else:
+            self.window_width = 1800
+            self.window_height = 1200
+            self.container_width = 850
+            self.image_size = (850, 650)
+
+        # Configurar la ventana
+        self.setGeometry(100, 100, self.window_width, self.window_height)
+        self.setFixedSize(self.window_width, self.window_height)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
 
         # Cargar categorías
@@ -220,22 +245,40 @@ class ClasificadorImagenes(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
+        layout.setSpacing(5)
+        layout.setContentsMargins(10, 10, 10, 5)
 
         # Layout horizontal para las imágenes
         images_layout = QHBoxLayout()
+        images_layout.setSpacing(20)
 
+        # Contenedor para la imagen original
+        left_container = QWidget()
+        left_container.setFixedWidth(self.container_width)
+        left_layout = QVBoxLayout(left_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        
         # Label para la imagen original
-        self.label_imagen = ImageLabel()
-        images_layout.addWidget(self.label_imagen)
+        self.label_imagen = ImageLabel(self.image_size)
+        left_layout.addWidget(self.label_imagen)
+        images_layout.addWidget(left_container)
 
+        # Contenedor para la imagen con zoom
+        right_container = QWidget()
+        right_container.setFixedWidth(self.container_width)
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        
         # Label para la imagen con zoom
-        self.label_zoom = ImageLabel()
-        images_layout.addWidget(self.label_zoom)
+        self.label_zoom = ImageLabel(self.image_size)
+        right_layout.addWidget(self.label_zoom)
+        images_layout.addWidget(right_container)
 
         layout.addLayout(images_layout)
 
         # Layout horizontal para la entrada
         input_layout = QHBoxLayout()
+        input_layout.setSpacing(5)
         
         # Label para la entrada
         input_layout.addWidget(QLabel("Categoría:"))
@@ -248,15 +291,23 @@ class ClasificadorImagenes(QMainWindow):
         
         layout.addLayout(input_layout)
 
+        # Layout horizontal para las etiquetas inferiores
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(5)
+
         # Label para el progreso
         self.label_progreso = QLabel()
-        self.label_progreso.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.label_progreso)
+        self.label_progreso.setAlignment(Qt.AlignLeft)
+        self.label_progreso.setMaximumHeight(20)
+        bottom_layout.addWidget(self.label_progreso)
 
         # Label para el nombre de la imagen
         self.label_nombre_imagen = QLabel()
-        self.label_nombre_imagen.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.label_nombre_imagen)
+        self.label_nombre_imagen.setAlignment(Qt.AlignRight)
+        self.label_nombre_imagen.setMaximumHeight(20)
+        bottom_layout.addWidget(self.label_nombre_imagen)
+
+        layout.addLayout(bottom_layout)
 
     def mostrar_imagen_actual(self):
         if self.imagen_actual_index >= len(self.imagenes):
@@ -285,7 +336,7 @@ class ClasificadorImagenes(QMainWindow):
         original_size = imagen.size
 
         # Redimensionar imagen manteniendo proporción
-        display_size = (600, 450)  # Tamaño más grande para las imágenes
+        display_size = self.image_size
         imagen.thumbnail(display_size, Image.LANCZOS)
         
         # Convertir imagen de PIL a QPixmap
@@ -312,8 +363,22 @@ class ClasificadorImagenes(QMainWindow):
             crop_y1 = max(0, y1 - margin_y)
             crop_y2 = min(imagen_original.size[1], y2 + margin_y)
             
+            # Recortar la imagen
             imagen_recortada = imagen_original.crop((crop_x1, crop_y1, crop_x2, crop_y2))
-            imagen_recortada.thumbnail(display_size, Image.LANCZOS)
+            
+            # Calcular el factor de escala para que la imagen recortada ocupe todo el espacio disponible
+            crop_width = crop_x2 - crop_x1
+            crop_height = crop_y2 - crop_y1
+            scale_x = display_size[0] / crop_width
+            scale_y = display_size[1] / crop_height
+            scale_factor = min(scale_x, scale_y)
+            
+            # Aplicar el zoom
+            new_size = (
+                int(crop_width * scale_factor),
+                int(crop_height * scale_factor)
+            )
+            imagen_recortada = imagen_recortada.resize(new_size, Image.LANCZOS)
             
             # Guardar y mostrar imagen recortada
             imagen_recortada.save("temp_zoom.png")
