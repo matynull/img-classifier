@@ -211,8 +211,13 @@ class ClasificadorImagenes(QMainWindow):
             return []
 
     def obtener_imagenes(self):
+        # Asegurarse de que la carpeta 'photos' existe
+        if not os.path.exists('photos'):
+            QMessageBox.critical(self, "Error", "No se encontró la carpeta 'photos'")
+            sys.exit(1)
+
         extensiones = ('.jpg', '.jpeg', '.png')
-        return [f for f in os.listdir('.') if f.lower().endswith(extensiones)]
+        return [f for f in os.listdir('photos') if f.lower().endswith(extensiones)]
 
     def cargar_bboxes(self):
         try:
@@ -327,9 +332,10 @@ class ClasificadorImagenes(QMainWindow):
         )
 
         # Cargar y mostrar imagen
-        imagen_path = self.imagenes[self.imagen_actual_index]
+        imagen_nombre = self.imagenes[self.imagen_actual_index]
+        imagen_path = os.path.join('photos', imagen_nombre)
         # Mostrar el nombre de la imagen
-        self.label_nombre_imagen.setText(imagen_path)
+        self.label_nombre_imagen.setText(imagen_nombre)
         imagen = Image.open(imagen_path)
         
         # Guardar tamaño original
@@ -348,8 +354,8 @@ class ClasificadorImagenes(QMainWindow):
         self.label_imagen.setPixmap(pixmap)
         
         # Establecer bounding box si existe
-        if imagen_path in self.bboxes:
-            bbox = self.bboxes[imagen_path]
+        if imagen_nombre in self.bboxes:
+            bbox = self.bboxes[imagen_nombre]
             self.label_imagen.set_bbox(bbox, original_size)
             
             # Crear imagen recortada para el zoom
@@ -388,7 +394,7 @@ class ClasificadorImagenes(QMainWindow):
             # Limpiar archivos temporales
             os.remove("temp_zoom.png")
         else:
-            QMessageBox.warning(self, "Advertencia", f"No se encontró bounding box para la imagen: {imagen_path}")
+            QMessageBox.warning(self, "Advertencia", f"No se encontró bounding box para la imagen: {imagen_nombre}")
             self.label_imagen.set_bbox(None, None)
             self.label_zoom.setPixmap(QPixmap())  # Limpiar imagen de zoom
         
@@ -415,7 +421,8 @@ class ClasificadorImagenes(QMainWindow):
         if self.imagen_actual_index >= len(self.imagenes):
             return
 
-        imagen_actual = self.imagenes[self.imagen_actual_index]
+        imagen_nombre = self.imagenes[self.imagen_actual_index]
+        imagen_path = os.path.join('photos', imagen_nombre)
         
         # Crear directorio skip si no existe
         skip_dir = "skip"
@@ -423,7 +430,7 @@ class ClasificadorImagenes(QMainWindow):
 
         # Mover imagen a la carpeta skip
         try:
-            shutil.move(imagen_actual, os.path.join(skip_dir, imagen_actual))
+            shutil.move(imagen_path, os.path.join(skip_dir, imagen_nombre))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al mover la imagen a skip: {str(e)}")
             return
@@ -435,7 +442,8 @@ class ClasificadorImagenes(QMainWindow):
         if self.imagen_actual_index >= len(self.imagenes):
             return
 
-        imagen_actual = self.imagenes[self.imagen_actual_index]
+        imagen_nombre = self.imagenes[self.imagen_actual_index]
+        imagen_path = os.path.join('photos', imagen_nombre)
 
         # Crear directorio si no existe
         Path(categoria).mkdir(exist_ok=True)
@@ -447,11 +455,11 @@ class ClasificadorImagenes(QMainWindow):
         try:
             # Obtener bbox de la imagen antes de moverla
             bbox_info = None
-            if imagen_actual in self.bboxes:
-                bbox_info = self.bboxes[imagen_actual]
+            if imagen_nombre in self.bboxes:
+                bbox_info = self.bboxes[imagen_nombre]
 
             # Mover la imagen
-            shutil.move(imagen_actual, os.path.join(categoria, imagen_actual))
+            shutil.move(imagen_path, os.path.join(categoria, imagen_nombre))
             
             # Si hay información de bbox, guardarla en el archivo bbox de la categoría
             if bbox_info:
@@ -459,16 +467,16 @@ class ClasificadorImagenes(QMainWindow):
                 with open(bbox_path, 'a', encoding='utf-8') as f:
                     # Escribir en el mismo formato que el archivo bbox original
                     x1, x2, y1, y2 = bbox_info
-                    f.write(f"{imagen_actual} {categoria} {x1} {x2} {y1} {y2}\n")
+                    f.write(f"{imagen_nombre} {categoria} {x1} {x2} {y1} {y2}\n")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al mover la imagen: {str(e)}")
             return
 
         # Asegurarse de que el input esté vacío antes de pasar a la siguiente imagen
-        self.entrada.blockSignals(True)  # Bloquear señales temporalmente
-        self.entrada.clear()  # Limpiar el texto
-        self.entrada.blockSignals(False)  # Restaurar señales
+        self.entrada.blockSignals(True)
+        self.entrada.clear()
+        self.entrada.blockSignals(False)
 
         self.imagen_actual_index += 1
         self.mostrar_imagen_actual()

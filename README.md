@@ -33,11 +33,26 @@ pip install -r requirements.txt
 ## Preparación
 
 1. Crear un archivo `categorias.txt` en la misma carpeta del script con las categorías deseadas (una por línea).
-2. Colocar las imágenes a clasificar (jpg o png) en la misma carpeta del script.
+2. Crear una carpeta llamada `photos` y colocar dentro las imágenes a clasificar (jpg o png).
 3. Si se desea usar bounding boxes, crear un archivo `bbox.txt` con el formato:
    ```
    nombre_imagen categoria x1 x2 y1 y2
    ```
+
+## Estructura de Directorios
+```
+.
+├── clasificador.py
+├── categorias.txt
+├── bbox.txt
+├── photos/
+│   ├── imagen1.jpg
+│   ├── imagen2.png
+│   └── ...
+├── categoria1/
+├── categoria2/
+└── skip/
+```
 
 ## Uso
 
