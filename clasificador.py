@@ -2,9 +2,9 @@ import os
 import sys
 import shutil
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                           QHBoxLayout, QLabel, QLineEdit, QCompleter, QMessageBox)
+                           QHBoxLayout, QLabel, QLineEdit, QCompleter, QMessageBox, QDialog, QPushButton)
 from PyQt5.QtCore import Qt, QSize, QRect, pyqtSignal
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor
+from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QIcon
 from PIL import Image
 from pathlib import Path
 
@@ -98,54 +98,186 @@ class ImageLabel(QLabel):
         self.bbox = None
         self.original_size = None
         self.setAlignment(Qt.AlignCenter)
-        self.setMinimumSize(QSize(size[0], size[1]))  # Usar el tamaño pasado como parámetro
+        self.setMinimumSize(QSize(size[0], size[1]))
+        self.drawing = False
+        self.start_point = None
+        self.current_bbox = None
+        self.setCursor(Qt.CrossCursor)  # Cambiar el cursor para indicar que se puede dibujar
 
     def set_bbox(self, bbox, original_size):
         self.bbox = bbox
         self.original_size = original_size
         self.update()
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self.bbox and self.pixmap() and self.original_size:
-            painter = QPainter(self)
-            pen = QPen(QColor(255, 0, 0))  # Color rojo
-            pen.setWidth(1)  # Grosor fino
-            painter.setPen(pen)
-            
-            # Obtener el rectángulo donde se dibuja la imagen
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drawing = True
+            # Convertir coordenadas de pantalla a coordenadas de imagen
             pixmap_rect = self.get_pixmap_rect()
+            if not pixmap_rect.contains(event.pos()):
+                return
             
             # Calcular las escalas
-            scale_x = pixmap_rect.width() / self.original_size[0]
-            scale_y = pixmap_rect.height() / self.original_size[1]
+            scale_x = self.original_size[0] / pixmap_rect.width()
+            scale_y = self.original_size[1] / pixmap_rect.height()
             
-            # Aplicar la escala a las coordenadas del bbox
+            # Convertir coordenadas
+            x = (event.pos().x() - pixmap_rect.x()) * scale_x
+            y = (event.pos().y() - pixmap_rect.y()) * scale_y
+            
+            self.start_point = (int(x), int(y))
+            self.current_bbox = None
+            self.update()
+
+    def mouseMoveEvent(self, event):
+        if self.drawing and self.start_point:
+            pixmap_rect = self.get_pixmap_rect()
+            if not pixmap_rect.contains(event.pos()):
+                return
+            
+            # Calcular las escalas
+            scale_x = self.original_size[0] / pixmap_rect.width()
+            scale_y = self.original_size[1] / pixmap_rect.height()
+            
+            # Convertir coordenadas
+            x = (event.pos().x() - pixmap_rect.x()) * scale_x
+            y = (event.pos().y() - pixmap_rect.y()) * scale_y
+            
+            x1 = min(self.start_point[0], int(x))
+            x2 = max(self.start_point[0], int(x))
+            y1 = min(self.start_point[1], int(y))
+            y2 = max(self.start_point[1], int(y))
+            self.current_bbox = (x1, x2, y1, y2)
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.drawing:
+            self.drawing = False
+            if self.current_bbox:
+                # Asegurarse de que el bbox tenga un tamaño mínimo
+                if (self.current_bbox[1] - self.current_bbox[0] > 5 and 
+                    self.current_bbox[3] - self.current_bbox[2] > 5):
+                    # Notificar al parent para mostrar el popup
+                    parent = self.parent()
+                    while parent and not isinstance(parent, ClasificadorImagenes):
+                        parent = parent.parent()
+                    if parent:
+                        parent.show_classification_dialog(self.current_bbox)
+            self.current_bbox = None
+            self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self.pixmap() or not self.original_size:
+            return
+
+        painter = QPainter(self)
+        pen = QPen(QColor(255, 0, 0))  # Color rojo
+        pen.setWidth(1)
+        painter.setPen(pen)
+
+        pixmap_rect = self.get_pixmap_rect()
+        scale_x = pixmap_rect.width() / self.original_size[0]
+        scale_y = pixmap_rect.height() / self.original_size[1]
+
+        # Dibujar el bbox original si existe
+        if self.bbox:
+            pen.setColor(QColor(255, 0, 0))  # Rojo para el bbox original
+            painter.setPen(pen)
             x1 = pixmap_rect.x() + int(self.bbox[0] * scale_x)
             x2 = pixmap_rect.x() + int(self.bbox[1] * scale_x)
             y1 = pixmap_rect.y() + int(self.bbox[2] * scale_y)
             y2 = pixmap_rect.y() + int(self.bbox[3] * scale_y)
-            
+            painter.drawRect(x1, y1, x2 - x1, y2 - y1)
+
+        # Dibujar el bbox actual si se está dibujando
+        if self.current_bbox:
+            pen.setColor(QColor(0, 255, 0))  # Verde para el bbox actual
+            painter.setPen(pen)
+            x1 = pixmap_rect.x() + int(self.current_bbox[0] * scale_x)
+            x2 = pixmap_rect.x() + int(self.current_bbox[1] * scale_x)
+            y1 = pixmap_rect.y() + int(self.current_bbox[2] * scale_y)
+            y2 = pixmap_rect.y() + int(self.current_bbox[3] * scale_y)
             painter.drawRect(x1, y1, x2 - x1, y2 - y1)
 
     def get_pixmap_rect(self):
         if not self.pixmap():
             return QRect()
         
-        # Obtener el tamaño escalado del pixmap
         scaled_size = self.pixmap().size()
         scaled_size.scale(self.size(), Qt.KeepAspectRatio)
         
-        # Calcular las coordenadas para centrar el pixmap
         x = (self.width() - scaled_size.width()) // 2
         y = (self.height() - scaled_size.height()) // 2
         
         return QRect(x, y, scaled_size.width(), scaled_size.height())
 
+class ClassificationDialog(QDialog):
+    def __init__(self, categorias, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Clasificar Bounding Box")
+        self.setModal(True)
+        
+        # Configurar el tamaño mínimo del diálogo
+        self.setMinimumWidth(300)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        
+        # Label de instrucción
+        instruction_label = QLabel("Ingrese la categoría para el bounding box:")
+        layout.addWidget(instruction_label)
+        
+        # Campo de entrada con autocompletado
+        self.entrada = AutoCompleteLineEdit(categorias)
+        self.entrada.returnPressed.connect(self.accept)
+        layout.addWidget(self.entrada)
+        
+        # Botones
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("Aceptar")
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button = QPushButton("Cancelar")
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+        
+        # Dar foco al campo de entrada
+        self.entrada.setFocus()
+
+    def get_categoria(self):
+        return self.entrada.text().strip()
+
+    def accept(self):
+        categoria = self.get_categoria()
+        if not categoria:
+            QMessageBox.warning(self, "Error", "Por favor ingrese una categoría")
+            return
+        super().accept()
+
 class ClasificadorImagenes(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Clasificador de Imágenes")
+        self.setWindowIcon(QIcon("icono.png"))
+        
+        # Obtener la resolución de la pantalla
+        screen = QApplication.primaryScreen().geometry()
+        window_width = int(screen.width() * 0.8)
+        window_height = int(screen.height() * 0.8)
+        self.setMinimumSize(window_width, window_height)
+        
+        # Variables de estado
+        self.current_bbox = None
+        self.bbox_counter = 0  # Contador para los nombres de las imágenes
+        
+        # Crear el widget central
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # Layout principal
+        layout = QVBoxLayout(central_widget)
         
         # Obtener la resolución de la pantalla
         screen = QApplication.primaryScreen()
@@ -334,6 +466,7 @@ class ClasificadorImagenes(QMainWindow):
         # Cargar y mostrar imagen
         imagen_nombre = self.imagenes[self.imagen_actual_index]
         imagen_path = os.path.join('photos', imagen_nombre)
+        
         # Mostrar el nombre de la imagen
         self.label_nombre_imagen.setText(imagen_nombre)
         imagen = Image.open(imagen_path)
@@ -448,10 +581,9 @@ class ClasificadorImagenes(QMainWindow):
         # Crear directorio si no existe
         Path(categoria).mkdir(exist_ok=True)
 
-        # Guardar la última categoría usada antes de cualquier operación
+        # Guardar la última categoría usada
         self.entrada.last_category = categoria
 
-        # Mover imagen
         try:
             # Obtener bbox de la imagen antes de moverla
             bbox_info = None
@@ -480,6 +612,56 @@ class ClasificadorImagenes(QMainWindow):
 
         self.imagen_actual_index += 1
         self.mostrar_imagen_actual()
+
+    def show_classification_dialog(self, bbox):
+        """Muestra el diálogo para clasificar el bounding box"""
+        if not hasattr(self, 'categorias'):
+            self.categorias = self.obtener_categorias()
+        
+        dialog = ClassificationDialog(self.categorias, self)
+        if dialog.exec_() == QDialog.Accepted:
+            categoria = dialog.get_categoria()
+            if categoria:
+                self.clasificar_bbox(bbox, categoria)
+                # Limpiar el bbox actual
+                self.current_bbox = None
+                # Encontrar el widget de imagen correcto
+                for child in self.findChildren(ImageLabel):
+                    child.current_bbox = None
+                    child.update()
+                    break
+
+    def clasificar_bbox(self, bbox, categoria):
+        """Clasifica un bounding box dibujado por el usuario"""
+        if not bbox:
+            return
+
+        # Obtener la imagen actual
+        imagen_actual = self.imagenes[self.imagen_actual_index]
+        imagen_path = os.path.join('photos', imagen_actual)
+        
+        # Crear el nombre base de la imagen (sin extensión)
+        nombre_base = os.path.splitext(imagen_actual)[0]
+        extension = os.path.splitext(imagen_actual)[1]
+        
+        # Crear el nuevo nombre con el contador
+        nuevo_nombre = f"{nombre_base}_{self.bbox_counter}{extension}"
+        self.bbox_counter += 1  # Incrementar el contador
+        
+        # Crear la carpeta de la categoría si no existe
+        if not os.path.exists(categoria):
+            os.makedirs(categoria)
+        
+        # Copiar la imagen a la carpeta de la categoría con el nuevo nombre
+        shutil.copy2(imagen_path, os.path.join(categoria, nuevo_nombre))
+        
+        # Guardar la información del bbox en el archivo bbox.txt
+        bbox_path = os.path.join(categoria, 'bbox.txt')
+        with open(bbox_path, 'a', encoding='utf-8') as f:
+            x1, x2, y1, y2 = bbox
+            f.write(f"{nuevo_nombre} {categoria} {x1} {x2} {y1} {y2}\n")
+
+        self.current_bbox = None
 
 def main():
     app = QApplication(sys.argv)
