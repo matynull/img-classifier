@@ -93,7 +93,7 @@ class AutoCompleteLineEdit(QLineEdit):
             painter.drawText(x, y, remaining)
 
 class ImageLabel(QLabel):
-    def __init__(self, size, parent=None):
+    def __init__(self, size, parent=None, can_draw_bbox=True):
         super().__init__(parent)
         self.bbox = None
         self.original_size = None
@@ -102,55 +102,91 @@ class ImageLabel(QLabel):
         self.drawing = False
         self.start_point = None
         self.current_bbox = None
-        self.setCursor(Qt.CrossCursor)  # Cambiar el cursor para indicar que se puede dibujar
+        self.can_draw_bbox = can_draw_bbox
+        if can_draw_bbox:
+            self.setCursor(Qt.CrossCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
 
     def set_bbox(self, bbox, original_size):
         self.bbox = bbox
         self.original_size = original_size
         self.update()
 
+    def get_pixmap_rect(self):
+        if not self.pixmap():
+            return QRect()
+        
+        scaled_size = self.pixmap().size()
+        scaled_size.scale(self.size(), Qt.KeepAspectRatio)
+        
+        x = (self.width() - scaled_size.width()) // 2
+        y = (self.height() - scaled_size.height()) // 2
+        
+        return QRect(x, y, scaled_size.width(), scaled_size.height())
+
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if not self.can_draw_bbox:
+            return
+        if event.button() == Qt.LeftButton and self.original_size:
             self.drawing = True
-            # Convertir coordenadas de pantalla a coordenadas de imagen
             pixmap_rect = self.get_pixmap_rect()
             if not pixmap_rect.contains(event.pos()):
                 return
             
-            # Calcular las escalas
+            # Calcular las escalas basadas en el tamaño real de la imagen
             scale_x = self.original_size[0] / pixmap_rect.width()
             scale_y = self.original_size[1] / pixmap_rect.height()
             
-            # Convertir coordenadas
+            # Convertir coordenadas del mouse a coordenadas de la imagen
             x = (event.pos().x() - pixmap_rect.x()) * scale_x
             y = (event.pos().y() - pixmap_rect.y()) * scale_y
+            
+            # Asegurarse de que las coordenadas estén dentro de los límites de la imagen
+            x = max(0, min(x, self.original_size[0]))
+            y = max(0, min(y, self.original_size[1]))
             
             self.start_point = (int(x), int(y))
             self.current_bbox = None
             self.update()
 
     def mouseMoveEvent(self, event):
-        if self.drawing and self.start_point:
+        if not self.can_draw_bbox:
+            return
+        if self.drawing and self.start_point and self.original_size:
             pixmap_rect = self.get_pixmap_rect()
             if not pixmap_rect.contains(event.pos()):
                 return
             
-            # Calcular las escalas
+            # Calcular las escalas basadas en el tamaño real de la imagen
             scale_x = self.original_size[0] / pixmap_rect.width()
             scale_y = self.original_size[1] / pixmap_rect.height()
             
-            # Convertir coordenadas
+            # Convertir coordenadas del mouse a coordenadas de la imagen
             x = (event.pos().x() - pixmap_rect.x()) * scale_x
             y = (event.pos().y() - pixmap_rect.y()) * scale_y
+            
+            # Asegurarse de que las coordenadas estén dentro de los límites de la imagen
+            x = max(0, min(x, self.original_size[0]))
+            y = max(0, min(y, self.original_size[1]))
             
             x1 = min(self.start_point[0], int(x))
             x2 = max(self.start_point[0], int(x))
             y1 = min(self.start_point[1], int(y))
             y2 = max(self.start_point[1], int(y))
+            
+            # Asegurarse de que el bbox no exceda los límites de la imagen
+            x1 = max(0, x1)
+            x2 = min(self.original_size[0], x2)
+            y1 = max(0, y1)
+            y2 = min(self.original_size[1], y2)
+            
             self.current_bbox = (x1, x2, y1, y2)
             self.update()
 
     def mouseReleaseEvent(self, event):
+        if not self.can_draw_bbox:
+            return
         if event.button() == Qt.LeftButton and self.drawing:
             self.drawing = False
             if self.current_bbox:
@@ -172,7 +208,7 @@ class ImageLabel(QLabel):
             return
 
         painter = QPainter(self)
-        pen = QPen(QColor(255, 0, 0))  # Color rojo
+        pen = QPen(QColor(255, 0, 0))
         pen.setWidth(1)
         painter.setPen(pen)
 
@@ -182,7 +218,7 @@ class ImageLabel(QLabel):
 
         # Dibujar el bbox original si existe
         if self.bbox:
-            pen.setColor(QColor(255, 0, 0))  # Rojo para el bbox original
+            pen.setColor(QColor(255, 0, 0))
             painter.setPen(pen)
             x1 = pixmap_rect.x() + int(self.bbox[0] * scale_x)
             x2 = pixmap_rect.x() + int(self.bbox[1] * scale_x)
@@ -192,25 +228,13 @@ class ImageLabel(QLabel):
 
         # Dibujar el bbox actual si se está dibujando
         if self.current_bbox:
-            pen.setColor(QColor(0, 255, 0))  # Verde para el bbox actual
+            pen.setColor(QColor(0, 255, 0))
             painter.setPen(pen)
             x1 = pixmap_rect.x() + int(self.current_bbox[0] * scale_x)
             x2 = pixmap_rect.x() + int(self.current_bbox[1] * scale_x)
             y1 = pixmap_rect.y() + int(self.current_bbox[2] * scale_y)
             y2 = pixmap_rect.y() + int(self.current_bbox[3] * scale_y)
             painter.drawRect(x1, y1, x2 - x1, y2 - y1)
-
-    def get_pixmap_rect(self):
-        if not self.pixmap():
-            return QRect()
-        
-        scaled_size = self.pixmap().size()
-        scaled_size.scale(self.size(), Qt.KeepAspectRatio)
-        
-        x = (self.width() - scaled_size.width()) // 2
-        y = (self.height() - scaled_size.height()) // 2
-        
-        return QRect(x, y, scaled_size.width(), scaled_size.height())
 
 class ClassificationDialog(QDialog):
     def __init__(self, categorias, parent=None):
@@ -391,12 +415,11 @@ class ClasificadorImagenes(QMainWindow):
 
         # Contenedor para la imagen original
         left_container = QWidget()
-        left_container.setFixedWidth(self.container_width)
         left_layout = QVBoxLayout(left_container)
         left_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Label para la imagen original
-        self.label_imagen = ImageLabel(self.image_size)
+        # Label para la imagen original (puede dibujar bbox)
+        self.label_imagen = ImageLabel(self.image_size, can_draw_bbox=True)
         left_layout.addWidget(self.label_imagen)
         images_layout.addWidget(left_container)
 
@@ -406,8 +429,8 @@ class ClasificadorImagenes(QMainWindow):
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Label para la imagen con zoom
-        self.label_zoom = ImageLabel(self.image_size)
+        # Label para la imagen con zoom (no puede dibujar bbox)
+        self.label_zoom = ImageLabel(self.image_size, can_draw_bbox=False)
         right_layout.addWidget(self.label_zoom)
         images_layout.addWidget(right_container)
 
@@ -474,6 +497,22 @@ class ClasificadorImagenes(QMainWindow):
         # Guardar tamaño original
         original_size = imagen.size
 
+        # Ajustar el tamaño del contenedor si la imagen es más pequeña
+        if original_size[0] < self.image_size[0] and original_size[1] < self.image_size[1]:
+            # La imagen es más pequeña que el tamaño mínimo, ajustar el contenedor
+            self.label_imagen.setMinimumSize(QSize(original_size[0], original_size[1]))
+            self.label_imagen.setMaximumSize(QSize(original_size[0], original_size[1]))
+            # Ajustar el contenedor izquierdo
+            left_container = self.label_imagen.parent()
+            left_container.setFixedWidth(original_size[0])
+        else:
+            # La imagen es más grande, usar el tamaño predefinido
+            self.label_imagen.setMinimumSize(QSize(self.image_size[0], self.image_size[1]))
+            self.label_imagen.setMaximumSize(QSize(self.image_size[0], self.image_size[1]))
+            # Restaurar el tamaño del contenedor izquierdo
+            left_container = self.label_imagen.parent()
+            left_container.setFixedWidth(self.container_width)
+
         # Redimensionar imagen manteniendo proporción
         display_size = self.image_size
         imagen.thumbnail(display_size, Image.LANCZOS)
@@ -485,6 +524,7 @@ class ClasificadorImagenes(QMainWindow):
         
         # Mostrar imagen original
         self.label_imagen.setPixmap(pixmap)
+        self.label_imagen.set_bbox(None, original_size)  # Establecer original_size incluso si no hay bbox
         
         # Establecer bounding box si existe
         if imagen_nombre in self.bboxes:
@@ -523,13 +563,11 @@ class ClasificadorImagenes(QMainWindow):
             imagen_recortada.save("temp_zoom.png")
             pixmap_zoom = QPixmap("temp_zoom.png")
             self.label_zoom.setPixmap(pixmap_zoom)
-            
-            # Limpiar archivos temporales
-            os.remove("temp_zoom.png")
+            self.label_zoom.set_bbox(None, (crop_width, crop_height))  # Establecer original_size para el zoom
         else:
             QMessageBox.warning(self, "Advertencia", f"No se encontró bounding box para la imagen: {imagen_nombre}")
-            self.label_imagen.set_bbox(None, None)
             self.label_zoom.setPixmap(QPixmap())  # Limpiar imagen de zoom
+            self.label_zoom.set_bbox(None, None)  # Limpiar bbox y original_size
         
         os.remove(imagen_path_temp)
         
