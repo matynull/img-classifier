@@ -241,22 +241,18 @@ class ClassificationDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Clasificar Bounding Box")
         self.setModal(True)
-        
+        self.categorias = categorias  # Guardar categorías para validación
         # Configurar el tamaño mínimo del diálogo
         self.setMinimumWidth(300)
-        
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        
         # Label de instrucción
         instruction_label = QLabel("Ingrese la categoría para el bounding box:")
         layout.addWidget(instruction_label)
-        
         # Campo de entrada con autocompletado
         self.entrada = AutoCompleteLineEdit(categorias)
         self.entrada.returnPressed.connect(self.accept)
         layout.addWidget(self.entrada)
-        
         # Botones
         button_layout = QHBoxLayout()
         self.ok_button = QPushButton("Aceptar")
@@ -266,7 +262,6 @@ class ClassificationDialog(QDialog):
         button_layout.addWidget(self.ok_button)
         button_layout.addWidget(self.cancel_button)
         layout.addLayout(button_layout)
-        
         # Dar foco al campo de entrada
         self.entrada.setFocus()
 
@@ -277,6 +272,9 @@ class ClassificationDialog(QDialog):
         categoria = self.get_categoria()
         if not categoria:
             QMessageBox.warning(self, "Error", "Por favor ingrese una categoría")
+            return
+        if categoria not in self.categorias:
+            QMessageBox.warning(self, "Error", "Categoría no válida. Debe estar en categorias.txt")
             return
         super().accept()
 
