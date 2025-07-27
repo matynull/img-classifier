@@ -307,8 +307,8 @@ class ClasificadorImagenes(QMainWindow):
         screen_height = screen_size.height()
 
         # Ajustar tamaños según la resolución
-        # Para 720p (1280x720)
-        if screen_height <= 720:
+        # Para 720p y resoluciones similares (1280x720, 1366x768)
+        if screen_height <= 800:
             self.window_width = 1100
             self.window_height = 680
             self.container_width = 500
