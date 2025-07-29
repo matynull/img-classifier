@@ -2,7 +2,8 @@ import os
 import sys
 import shutil
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                           QHBoxLayout, QLabel, QLineEdit, QCompleter, QMessageBox, QDialog, QPushButton)
+                           QHBoxLayout, QLabel, QLineEdit, QCompleter, QMessageBox, QDialog, QPushButton,
+                           QMenuBar, QAction, QFileDialog, QListWidget, QListWidgetItem)
 from PyQt5.QtCore import Qt, QSize, QRect, pyqtSignal
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QIcon
 from PIL import Image
@@ -16,6 +17,8 @@ class AutoCompleteLineEdit(QLineEdit):
         self._completer = None
         self._suggestion = ""
         self._last_category = ""  # Variable privada para la última categoría
+        self._ejemplos_path = "ejemplos"  # Carpeta de ejemplos
+        self._preview_label = None  # Label para mostrar la imagen de ejemplo
         self.textChanged.connect(self.updateSuggestion)
         self.setCompleter(completevalues)
 
@@ -49,6 +52,21 @@ class AutoCompleteLineEdit(QLineEdit):
         self._completer = completer
         super().setCompleter(completer)
 
+    def set_preview_label(self, label):
+        """Establece el label donde mostrar las imágenes de ejemplo"""
+        self._preview_label = label
+
+    def get_ejemplo_path(self, categoria):
+        """Obtiene la ruta de la imagen de ejemplo para una categoría"""
+        if not categoria:
+            return None
+        extensiones = ['.jpg', '.jpeg', '.png', '.bmp', '.gif']
+        for ext in extensiones:
+            path = os.path.join(self._ejemplos_path, f"{categoria}{ext}")
+            if os.path.exists(path):
+                return path
+        return None
+
     def updateSuggestion(self, text):
         """Busca la mejor sugerencia que empiece con el texto actual."""
         self._suggestion = ""
@@ -60,13 +78,48 @@ class AutoCompleteLineEdit(QLineEdit):
                     candidate = model.data(idx)
                     if candidate.lower().startswith(text.lower()):
                         self._suggestion = candidate
+                        # Mostrar imagen de ejemplo si existe
+                        self.show_example_image(candidate)
                         break
+        else:
+            # Si no hay texto, limpiar la imagen de ejemplo
+            if self._preview_label:
+                self._preview_label.clear()
+                self._preview_label.setText("")
         self.update()
+
+    def show_example_image(self, categoria):
+        """Muestra la imagen de ejemplo para la categoría dada"""
+        if not self._preview_label:
+            return
+        
+        ejemplo_path = self.get_ejemplo_path(categoria)
+        if ejemplo_path and os.path.exists(ejemplo_path):
+            try:
+                pixmap = QPixmap(ejemplo_path)
+                if not pixmap.isNull():
+                    # Escalar la imagen manteniendo la proporción
+                    scaled_pixmap = pixmap.scaled(375, 375, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    self._preview_label.setPixmap(scaled_pixmap)
+                    self._preview_label.setText("")  # Limpiar texto
+                else:
+                    self._preview_label.clear()
+                    self._preview_label.setText("Imagen no válida")
+            except Exception as e:
+                self._preview_label.clear()
+                self._preview_label.setText("Error al cargar imagen")
+        else:
+            self._preview_label.clear()
+            self._preview_label.setText("Sin ejemplo")
 
     def clear(self):
         """Sobreescribir clear para asegurar que el texto se limpia completamente"""
         super().clear()
         self.setText("")  # Forzar texto vacío
+        # Limpiar imagen de ejemplo
+        if self._preview_label:
+            self._preview_label.clear()
+            self._preview_label.setText("")
         
     def setText(self, text):
         """Sobreescribir setText para controlar el texto inicial"""
@@ -301,6 +354,9 @@ class ClasificadorImagenes(QMainWindow):
         # Layout principal
         layout = QVBoxLayout(central_widget)
         
+        # Crear menú
+        self.create_menu()
+        
         # Obtener la resolución de la pantalla
         screen = QApplication.primaryScreen()
         screen_size = screen.size()
@@ -309,10 +365,10 @@ class ClasificadorImagenes(QMainWindow):
         # Ajustar tamaños según la resolución
         # Para 720p y resoluciones similares (1280x720, 1366x768)
         if screen_height <= 800:
-            self.window_width = 1100
-            self.window_height = 680
-            self.container_width = 500
-            self.image_size = (500, 380)
+            self.window_width = 900
+            self.window_height = 580
+            self.container_width = 400
+            self.image_size = (400, 300)
         # Para 1080p (1920x1080)
         elif screen_height <= 1080:
             self.window_width = 1400
@@ -356,6 +412,102 @@ class ClasificadorImagenes(QMainWindow):
         
         # Mostrar primera imagen
         self.mostrar_imagen_actual()
+
+    def create_menu(self):
+        """Crear menú de la aplicación"""
+        menubar = self.menuBar()
+        
+        # Menú de herramientas
+        tools_menu = menubar.addMenu('Herramientas')
+        
+        # Acción para cargar ejemplos
+        cargar_ejemplos_action = QAction('Cargar Ejemplos', self)
+        cargar_ejemplos_action.setStatusTip('Cargar imágenes de ejemplo para cada categoría')
+        cargar_ejemplos_action.triggered.connect(self.cargar_ejemplos)
+        tools_menu.addAction(cargar_ejemplos_action)
+
+    def cargar_ejemplos(self):
+        """Cargar imágenes de ejemplo para cada categoría"""
+        # Crear carpeta de ejemplos si no existe
+        ejemplos_path = "ejemplos"
+        Path(ejemplos_path).mkdir(exist_ok=True)
+        
+        # Obtener categorías que no tienen ejemplo
+        categorias_sin_ejemplo = []
+        for categoria in self.categorias:
+            tiene_ejemplo = False
+            extensiones = ['.jpg', '.jpeg', '.png', '.bmp', '.gif']
+            for ext in extensiones:
+                ejemplo_path = os.path.join(ejemplos_path, f"{categoria}{ext}")
+                if os.path.exists(ejemplo_path):
+                    tiene_ejemplo = True
+                    break
+            if not tiene_ejemplo:
+                categorias_sin_ejemplo.append(categoria)
+        
+        if not categorias_sin_ejemplo:
+            QMessageBox.information(self, "Información", "Todas las categorías ya tienen imágenes de ejemplo.")
+            return
+        
+        # Preguntar si desea cargar ejemplos para las categorías faltantes
+        reply = QMessageBox.question(self, "Cargar Ejemplos", 
+                                   f"Se encontraron {len(categorias_sin_ejemplo)} categorías sin imagen de ejemplo.\n"
+                                   f"¿Desea cargar imágenes para estas categorías?",
+                                   QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            self.cargar_ejemplos_categorias(categorias_sin_ejemplo, ejemplos_path)
+
+    def cargar_ejemplos_categorias(self, categorias, ejemplos_path):
+        """Cargar ejemplos para las categorías especificadas"""
+        for i, categoria in enumerate(categorias):
+            # Mostrar progreso
+            progress_text = f"Cargando ejemplo para: {categoria} ({i+1}/{len(categorias)})"
+            
+            # Abrir diálogo para seleccionar imagen
+            file_dialog = QFileDialog()
+            file_dialog.setWindowTitle(f"Seleccionar imagen de ejemplo para: {categoria}")
+            file_dialog.setNameFilter("Imágenes (*.png *.jpg *.jpeg *.bmp *.gif)")
+            file_dialog.setFileMode(QFileDialog.ExistingFile)
+            
+            if file_dialog.exec_() == QFileDialog.Accepted:
+                selected_files = file_dialog.selectedFiles()
+                if selected_files:
+                    source_path = selected_files[0]
+                    # Obtener extensión del archivo original
+                    _, ext = os.path.splitext(source_path)
+                    # Crear ruta de destino
+                    dest_path = os.path.join(ejemplos_path, f"{categoria}{ext}")
+                    
+                    try:
+                        # Copiar imagen a la carpeta de ejemplos
+                        shutil.copy2(source_path, dest_path)
+                        
+                        # Redimensionar imagen para optimizar espacio (opcional)
+                        self.resize_example_image(dest_path)
+                        
+                    except Exception as e:
+                        QMessageBox.warning(self, "Error", f"Error al copiar imagen para {categoria}: {str(e)}")
+            else:
+                # Si cancela, preguntar si desea continuar con las demás
+                if i < len(categorias) - 1:  # Si no es la última categoría
+                    reply = QMessageBox.question(self, "Continuar", 
+                                               f"¿Desea continuar con las categorías restantes?",
+                                               QMessageBox.Yes | QMessageBox.No)
+                    if reply == QMessageBox.No:
+                        break
+        
+        QMessageBox.information(self, "Completado", "Proceso de carga de ejemplos completado.")
+
+    def resize_example_image(self, image_path):
+        """Redimensionar imagen de ejemplo para optimizar espacio"""
+        try:
+            with Image.open(image_path) as img:
+                # Redimensionar manteniendo proporción, máximo 300x300
+                img.thumbnail((300, 300), Image.LANCZOS)
+                img.save(image_path, optimize=True, quality=85)
+        except Exception as e:
+            print(f"Error al redimensionar imagen {image_path}: {e}")
 
     def cargar_categorias(self):
         try:
@@ -436,16 +588,32 @@ class ClasificadorImagenes(QMainWindow):
 
         # Layout horizontal para la entrada
         input_layout = QHBoxLayout()
-        input_layout.setSpacing(5)
+        input_layout.setSpacing(10)
+        
+        # Layout vertical para el campo de entrada
+        input_container = QVBoxLayout()
         
         # Label para la entrada
-        input_layout.addWidget(QLabel("Categoría:"))
+        input_container.addWidget(QLabel("Categoría:"))
         
         # Campo de entrada con autocompletado
         self.entrada = AutoCompleteLineEdit(self.categorias)
         self.entrada.returnPressed.connect(self.procesar_clasificacion)
         self.entrada.nextImageSignal.connect(self.siguiente_imagen)
-        input_layout.addWidget(self.entrada)
+        input_container.addWidget(self.entrada)
+        
+        input_layout.addLayout(input_container)
+        
+        # Label para mostrar imagen de ejemplo
+        self.label_ejemplo = QLabel()
+        self.label_ejemplo.setFixedSize(375, 375)
+        self.label_ejemplo.setAlignment(Qt.AlignCenter)
+        self.label_ejemplo.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
+        self.label_ejemplo.setText("Imagen de ejemplo")
+        input_layout.addWidget(self.label_ejemplo)
+        
+        # Conectar el label de ejemplo con el campo de entrada
+        self.entrada.set_preview_label(self.label_ejemplo)
         
         layout.addLayout(input_layout)
 
@@ -478,6 +646,11 @@ class ClasificadorImagenes(QMainWindow):
         self.entrada.clear()
         self.entrada.setText("")  # Forzar texto vacío
         self.entrada.blockSignals(False)
+        
+        # Limpiar imagen de ejemplo
+        if hasattr(self, 'label_ejemplo'):
+            self.label_ejemplo.clear()
+            self.label_ejemplo.setText("Imagen de ejemplo")
 
         # Actualizar etiqueta de progreso
         self.label_progreso.setText(
