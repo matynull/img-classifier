@@ -3,9 +3,9 @@ import sys
 import shutil
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QLabel, QLineEdit, QCompleter, QMessageBox, QDialog, QPushButton,
-                           QMenuBar, QAction, QFileDialog, QListWidget, QListWidgetItem)
+                           QMenuBar, QAction, QFileDialog, QListWidget, QListWidgetItem, QProgressBar, QFrame)
 from PyQt5.QtCore import Qt, QSize, QRect, pyqtSignal
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QIcon
+from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QKeySequence
 from PIL import Image
 from pathlib import Path
 
@@ -460,6 +460,10 @@ class ClasificadorImagenes(QMainWindow):
         self.current_bbox = None
         self.bbox_counter = 0  # Contador para los nombres de las imágenes
         
+        # Variables para estadísticas
+        self.clasificacion_stats = {}  # Diccionario para contar clasificaciones por categoría
+        self.total_clasificadas = 0
+        
         # Crear el widget central
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -804,18 +808,53 @@ class ClasificadorImagenes(QMainWindow):
         """)
         input_container.addWidget(categoria_label)
         
-        # Campo de entrada con autocompletado mejorado
-        self.entrada = AutoCompleteLineEdit(self.categorias)
-        self.entrada.setStyleSheet("""
-            QLineEdit {
-                font-size: 14px;
+        # Layout horizontal para entrada y navegación
+        entrada_nav_layout = QHBoxLayout()
+        entrada_nav_layout.setSpacing(8)
+        
+        # Botón anterior
+        self.btn_anterior = QPushButton("◀")
+        self.btn_anterior.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                font-weight: bold;
                 padding: 8px 12px;
                 border: 1px solid #ced4da;
                 border-radius: 6px;
                 background-color: #ffffff;
                 color: #495057;
-                min-height: 16px;
+                min-width: 40px;
+                max-width: 40px;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                border-color: #adb5bd;
+            }
+            QPushButton:pressed {
+                background-color: #dee2e6;
+            }
+            QPushButton:disabled {
+                background-color: #f8f9fa;
+                color: #ced4da;
+                border-color: #e9ecef;
+            }
+        """)
+        self.btn_anterior.clicked.connect(self.imagen_anterior)
+        entrada_nav_layout.addWidget(self.btn_anterior)
+        
+        # Campo de entrada con autocompletado mejorado (más ancho)
+        self.entrada = AutoCompleteLineEdit(self.categorias)
+        self.entrada.setStyleSheet("""
+            QLineEdit {
+                font-size: 15px;
+                padding: 10px 15px;
+                border: 1px solid #ced4da;
+                border-radius: 6px;
+                background-color: #ffffff;
+                color: #495057;
+                min-height: 20px;
                 font-weight: 500;
+                min-width: 300px;
             }
             QLineEdit:focus {
                 border-color: #0d6efd;
@@ -830,20 +869,83 @@ class ClasificadorImagenes(QMainWindow):
         self.entrada.setPlaceholderText("Escribe o selecciona una categoría...")
         self.entrada.returnPressed.connect(self.procesar_clasificacion)
         self.entrada.nextImageSignal.connect(self.siguiente_imagen)
-        input_container.addWidget(self.entrada)
+        entrada_nav_layout.addWidget(self.entrada)
         
-        # Añadir texto de ayuda
-        help_text = QLabel("Presiona Enter para clasificar, Ctrl para saltar")
-        help_text.setStyleSheet("""
+        # Botón siguiente
+        self.btn_siguiente = QPushButton("▶")
+        self.btn_siguiente.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                font-weight: bold;
+                padding: 8px 12px;
+                border: 1px solid #ced4da;
+                border-radius: 6px;
+                background-color: #ffffff;
+                color: #495057;
+                min-width: 40px;
+                max-width: 40px;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                border-color: #adb5bd;
+            }
+            QPushButton:pressed {
+                background-color: #dee2e6;
+            }
+            QPushButton:disabled {
+                background-color: #f8f9fa;
+                color: #ced4da;
+                border-color: #e9ecef;
+            }
+        """)
+        self.btn_siguiente.clicked.connect(self.imagen_siguiente)
+        entrada_nav_layout.addWidget(self.btn_siguiente)
+        
+        input_container.addLayout(entrada_nav_layout)
+        
+        # Separador visual
+        separador = QFrame()
+        separador.setFrameShape(QFrame.HLine)
+        separador.setStyleSheet("""
+            QFrame {
+                color: #dee2e6;
+                margin: 8px 0px;
+            }
+        """)
+        input_container.addWidget(separador)
+        
+        # Estadísticas de clasificación (aesthetic)
+        self.stats_label = QLabel()
+        self.stats_label.setStyleSheet("""
             QLabel {
                 font-size: 12px;
+                color: #495057;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                           stop:0 #e3f2fd, stop:1 #f3e5f5);
+                border: 1px solid #bbdefb;
+                border-radius: 6px;
+                padding: 8px 12px;
+                margin: 4px 0px;
+                font-weight: 500;
+            }
+        """)
+        self.stats_label.setAlignment(Qt.AlignCenter)
+        input_container.addWidget(self.stats_label)
+        
+        # Añadir texto de ayuda
+        help_text = QLabel("Enter: clasificar | Ctrl: saltar | ◀ ▶: navegar")
+        help_text.setStyleSheet("""
+            QLabel {
+                font-size: 11px;
                 color: #6c757d;
-                margin-top: 8px;
+                margin-top: 6px;
                 font-style: italic;
                 background: none;
                 border: none;
+                text-align: center;
             }
         """)
+        help_text.setAlignment(Qt.AlignCenter)
         input_container.addWidget(help_text)
         
         input_layout.addWidget(input_widget)
@@ -916,23 +1018,51 @@ class ClasificadorImagenes(QMainWindow):
         bottom_layout.setSpacing(15)
         bottom_layout.setContentsMargins(15, 10, 15, 10)
 
-        # Label para el progreso con estilo moderno más grande
+        # Barra de progreso visual (aesthetic)
+        progress_container = QVBoxLayout()
+        progress_container.setSpacing(5)
+        
+        # Label del progreso (texto a la izquierda)
         self.label_progreso = QLabel()
         self.label_progreso.setStyleSheet("""
             QLabel {
-                font-size: 18px;
-                font-weight: bold;
-                color: #007bff;
+                font-size: 14px;
+                font-weight: 600;
+                color: #495057;
                 background: none;
                 border: none;
-                padding: 10px 15px;
-                background-color: #e7f3ff;
-                border-radius: 8px;
-                min-height: 30px;
+                padding: 2px 0px;
             }
         """)
         self.label_progreso.setAlignment(Qt.AlignLeft)
-        bottom_layout.addWidget(self.label_progreso)
+        progress_container.addWidget(self.label_progreso)
+        
+        # Barra de progreso visual (más sutil)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #e9ecef;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+                text-align: center;
+                font-size: 10px;
+                font-weight: 400;
+                color: #6c757d;
+                height: 12px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                           stop:0 #e3f2fd, stop:0.5 #bbdefb, stop:1 #90caf9);
+                border-radius: 3px;
+                margin: 1px;
+            }
+        """)
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        progress_container.addWidget(self.progress_bar)
+        
+        bottom_layout.addLayout(progress_container)
 
         # Separador visual
         separator = QLabel("|")
@@ -991,6 +1121,17 @@ class ClasificadorImagenes(QMainWindow):
         self.label_progreso.setText(
             f"Progreso: {progreso_actual}/{total_imagenes} ({porcentaje:.1f}%)"
         )
+        
+        # Actualizar barra de progreso visual
+        self.progress_bar.setValue(int(porcentaje))
+        self.progress_bar.setFormat(f"{progreso_actual}/{total_imagenes}")
+        
+        # Actualizar estadísticas
+        self.actualizar_estadisticas()
+        
+        # Actualizar estado de botones de navegación
+        self.btn_anterior.setEnabled(self.imagen_actual_index > 0)
+        self.btn_siguiente.setEnabled(self.imagen_actual_index < len(self.imagenes) - 1)
 
         # Cargar y mostrar imagen
         imagen_nombre = self.imagenes[self.imagen_actual_index]
@@ -1080,6 +1221,18 @@ class ClasificadorImagenes(QMainWindow):
         # Dar foco al campo de entrada
         self.entrada.setFocus()
 
+    def keyPressEvent(self, event):
+        """Manejar eventos de teclado para navegación"""
+        if event.key() == Qt.Key_Left:
+            # Tecla izquierda - imagen anterior
+            self.imagen_anterior()
+        elif event.key() == Qt.Key_Right:
+            # Tecla derecha - imagen siguiente
+            self.imagen_siguiente()
+        else:
+            # Pasar el evento al handler por defecto
+            super().keyPressEvent(event)
+
     def procesar_clasificacion(self):
         categoria = self.entrada.text().strip()
         if not categoria:
@@ -1127,6 +1280,13 @@ class ClasificadorImagenes(QMainWindow):
 
         # Guardar la última categoría usada
         self.entrada.last_category = categoria
+        
+        # Actualizar estadísticas
+        if categoria in self.clasificacion_stats:
+            self.clasificacion_stats[categoria] += 1
+        else:
+            self.clasificacion_stats[categoria] = 1
+        self.total_clasificadas += 1
 
         try:
             # Obtener bbox de la imagen antes de moverla
@@ -1156,6 +1316,45 @@ class ClasificadorImagenes(QMainWindow):
 
         self.imagen_actual_index += 1
         self.mostrar_imagen_actual()
+
+    def imagen_anterior(self):
+        """Navega a la imagen anterior"""
+        if self.imagen_actual_index > 0:
+            self.imagen_actual_index -= 1
+            self.mostrar_imagen_actual()
+
+    def imagen_siguiente(self):
+        """Navega a la imagen siguiente"""
+        if self.imagen_actual_index < len(self.imagenes) - 1:
+            self.imagen_actual_index += 1
+            self.mostrar_imagen_actual()
+
+    def actualizar_estadisticas(self):
+        """Actualiza las estadísticas de clasificación de forma aesthetic y ordenada"""
+        if not self.clasificacion_stats:
+            self.stats_label.setText("📋 Aún no hay clasificaciones realizadas")
+            return
+        
+        # Obtener top 3 categorías más clasificadas
+        top_categorias = sorted(self.clasificacion_stats.items(), key=lambda x: x[1], reverse=True)[:3]
+        
+        # Formatear estadísticas de manera más ordenada
+        total_text = f"Total: {self.total_clasificadas}"
+        
+        if top_categorias:
+            # Formatear top categorías de manera más clara
+            if len(top_categorias) == 1:
+                top_text = f"Top: {top_categorias[0][0]} ({top_categorias[0][1]})"
+            elif len(top_categorias) == 2:
+                top_text = f"Top: {top_categorias[0][0]} ({top_categorias[0][1]}) • {top_categorias[1][0]} ({top_categorias[1][1]})"
+            else:
+                top_text = f"Top: {top_categorias[0][0]} ({top_categorias[0][1]}) • {top_categorias[1][0]} ({top_categorias[1][1]}) • {top_categorias[2][0]} ({top_categorias[2][1]})"
+            
+            stats_text = f"{total_text}  |  {top_text}"
+        else:
+            stats_text = total_text
+        
+        self.stats_label.setText(stats_text)
 
     def show_classification_dialog(self, bbox):
         """Muestra el diálogo para clasificar el bounding box"""
@@ -1191,6 +1390,13 @@ class ClasificadorImagenes(QMainWindow):
         # Crear el nuevo nombre con el contador
         nuevo_nombre = f"{nombre_base}_{self.bbox_counter}{extension}"
         self.bbox_counter += 1  # Incrementar el contador
+        
+        # Actualizar estadísticas
+        if categoria in self.clasificacion_stats:
+            self.clasificacion_stats[categoria] += 1
+        else:
+            self.clasificacion_stats[categoria] = 1
+        self.total_clasificadas += 1
         
         # Crear la carpeta de la categoría si no existe
         if not os.path.exists(categoria):
