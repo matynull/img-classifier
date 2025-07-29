@@ -99,7 +99,7 @@ class AutoCompleteLineEdit(QLineEdit):
                 pixmap = QPixmap(ejemplo_path)
                 if not pixmap.isNull():
                     # Escalar la imagen manteniendo la proporción
-                    scaled_pixmap = pixmap.scaled(375, 375, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    scaled_pixmap = pixmap.scaled(280, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     self._preview_label.setPixmap(scaled_pixmap)
                     self._preview_label.setText("")  # Limpiar texto
                 else:
@@ -292,29 +292,108 @@ class ImageLabel(QLabel):
 class ClassificationDialog(QDialog):
     def __init__(self, categorias, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Clasificar Bounding Box")
+        self.setWindowTitle("Clasificar Región Seleccionada")
         self.setModal(True)
         self.categorias = categorias  # Guardar categorías para validación
-        # Configurar el tamaño mínimo del diálogo
-        self.setMinimumWidth(300)
+        
+        # Configurar el diálogo con estilo moderno
+        self.setMinimumWidth(400)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+                border-radius: 12px;
+            }
+            QLabel {
+                font-size: 14px;
+                color: #495057;
+                background: none;
+                border: none;
+            }
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 6px;
+                border: none;
+                min-width: 100px;
+            }
+            QPushButton[primary="true"] {
+                background-color: #007bff;
+                color: white;
+            }
+            QPushButton[primary="true"]:hover {
+                background-color: #0056b3;
+            }
+            QPushButton[primary="true"]:pressed {
+                background-color: #004085;
+            }
+            QPushButton[secondary="true"] {
+                background-color: #6c757d;
+                color: white;
+            }
+            QPushButton[secondary="true"]:hover {
+                background-color: #545b62;
+            }
+        """)
+        
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setSpacing(15)
+        layout.setContentsMargins(25, 25, 25, 25)
+        
         # Label de instrucción
-        instruction_label = QLabel("Ingrese la categoría para el bounding box:")
+        instruction_label = QLabel("Selecciona la categoría para la región marcada:")
+        instruction_label.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #495057;
+                margin-bottom: 10px;
+            }
+        """)
         layout.addWidget(instruction_label)
-        # Campo de entrada con autocompletado
+        
+        # Campo de entrada con autocompletado mejorado
         self.entrada = AutoCompleteLineEdit(categorias)
+        self.entrada.setStyleSheet("""
+            QLineEdit {
+                font-size: 14px;
+                padding: 12px 15px;
+                border: 2px solid #dee2e6;
+                border-radius: 8px;
+                background-color: #ffffff;
+                color: #495057;
+                min-height: 20px;
+            }
+            QLineEdit:focus {
+                border-color: #007bff;
+                background-color: #f8f9ff;
+            }
+        """)
+        self.entrada.setPlaceholderText("Escribe para buscar categorías...")
         self.entrada.returnPressed.connect(self.accept)
         layout.addWidget(self.entrada)
-        # Botones
+        
+        # Espaciador
+        layout.addSpacing(10)
+        
+        # Botones con estilo moderno
         button_layout = QHBoxLayout()
-        self.ok_button = QPushButton("Aceptar")
-        self.ok_button.clicked.connect(self.accept)
+        button_layout.addStretch()
+        
         self.cancel_button = QPushButton("Cancelar")
+        self.cancel_button.setProperty("secondary", True)
         self.cancel_button.clicked.connect(self.reject)
-        button_layout.addWidget(self.ok_button)
         button_layout.addWidget(self.cancel_button)
+        
+        button_layout.addSpacing(10)
+        
+        self.ok_button = QPushButton("Aceptar")
+        self.ok_button.setProperty("primary", True)
+        self.ok_button.clicked.connect(self.accept)
+        button_layout.addWidget(self.ok_button)
+        
         layout.addLayout(button_layout)
+        
         # Dar foco al campo de entrada
         self.entrada.setFocus()
 
@@ -334,8 +413,42 @@ class ClassificationDialog(QDialog):
 class ClasificadorImagenes(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Clasificador de Imágenes")
+        self.setWindowTitle("Clasificador de Especies Marinas")
         self.setWindowIcon(QIcon("icono.png"))
+        
+        # Estilo moderno para la ventana principal
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f8f9fa;
+            }
+            QMenuBar {
+                background-color: #ffffff;
+                border-bottom: 1px solid #e9ecef;
+                padding: 5px;
+                font-size: 14px;
+            }
+            QMenuBar::item {
+                background-color: transparent;
+                padding: 8px 12px;
+                border-radius: 4px;
+            }
+            QMenuBar::item:selected {
+                background-color: #e9ecef;
+            }
+            QMenu {
+                background-color: white;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 8px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #e9ecef;
+            }
+        """)
         
         # Obtener la resolución de la pantalla
         screen = QApplication.primaryScreen().geometry()
@@ -365,22 +478,22 @@ class ClasificadorImagenes(QMainWindow):
         # Ajustar tamaños según la resolución
         # Para 720p y resoluciones similares (1280x720, 1366x768)
         if screen_height <= 800:
-            self.window_width = 900
-            self.window_height = 580
-            self.container_width = 400
-            self.image_size = (400, 300)
+            self.window_width = 1000
+            self.window_height = 620
+            self.container_width = 450
+            self.image_size = (450, 350)
         # Para 1080p (1920x1080)
         elif screen_height <= 1080:
-            self.window_width = 1400
-            self.window_height = 900
-            self.container_width = 650
-            self.image_size = (650, 500)
+            self.window_width = 1500
+            self.window_height = 950
+            self.container_width = 700
+            self.image_size = (700, 550)
         # Para 2K (2560x1440) o superior
         else:
-            self.window_width = 1800
-            self.window_height = 1200
-            self.container_width = 850
-            self.image_size = (850, 650)
+            self.window_width = 1900
+            self.window_height = 1250
+            self.container_width = 900
+            self.image_size = (900, 700)
 
         # Configurar la ventana
         self.setGeometry(100, 100, self.window_width, self.window_height)
@@ -552,35 +665,107 @@ class ClasificadorImagenes(QMainWindow):
             return {}
 
     def setup_ui(self):
-        # Widget central
+        # Widget central con estilo moderno
         central_widget = QWidget()
+        central_widget.setStyleSheet("""
+            QWidget {
+                background-color: #f8f9fa;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }
+        """)
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
-        layout.setSpacing(5)
-        layout.setContentsMargins(10, 10, 10, 5)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 15)
 
         # Layout horizontal para las imágenes
         images_layout = QHBoxLayout()
-        images_layout.setSpacing(20)
+        images_layout.setSpacing(25)
 
         # Contenedor para la imagen original
         left_container = QWidget()
+        left_container.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                           stop:0 #ffffff, stop:1 #f8f9fa);
+                border: 1px solid #dee2e6;
+                border-radius: 10px;
+                padding: 5px;
+            }
+        """)
         left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setContentsMargins(2, 2, 2, 2)
+        
+        # Título para la imagen original
+        original_title = QLabel("Imagen Original")
+        original_title.setStyleSheet("""
+            QLabel {
+                font-size: 15px;
+                font-weight: 600;
+                color: #343a40;
+                margin-bottom: 8px;
+                background: none;
+                border: none;
+                letter-spacing: 0.5px;
+            }
+        """)
+        original_title.setAlignment(Qt.AlignCenter)
+        left_layout.addWidget(original_title)
         
         # Label para la imagen original (puede dibujar bbox)
         self.label_imagen = ImageLabel(self.image_size, can_draw_bbox=True)
+        self.label_imagen.setStyleSheet("""
+            QLabel {
+                border: none;
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+            }
+        """)
         left_layout.addWidget(self.label_imagen)
         images_layout.addWidget(left_container)
 
         # Contenedor para la imagen con zoom
         right_container = QWidget()
         right_container.setFixedWidth(self.container_width)
+        right_container.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                           stop:0 #ffffff, stop:1 #f8f9fa);
+                border: 1px solid #dee2e6;
+                border-radius: 10px;
+                padding: 5px;
+            }
+        """)
         right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(2, 2, 2, 2)
+        
+        # Título para la imagen con zoom
+        zoom_title = QLabel("Vista Detallada")
+        zoom_title.setStyleSheet("""
+            QLabel {
+                font-size: 15px;
+                font-weight: 600;
+                color: #343a40;
+                margin-bottom: 8px;
+                background: none;
+                border: none;
+                letter-spacing: 0.5px;
+            }
+        """)
+        zoom_title.setAlignment(Qt.AlignCenter)
+        right_layout.addWidget(zoom_title)
         
         # Label para la imagen con zoom (no puede dibujar bbox)
         self.label_zoom = ImageLabel(self.image_size, can_draw_bbox=False)
+        self.label_zoom.setStyleSheet("""
+            QLabel {
+                border: none;
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+            }
+        """)
         right_layout.addWidget(self.label_zoom)
         images_layout.addWidget(right_container)
 
@@ -588,52 +773,198 @@ class ClasificadorImagenes(QMainWindow):
 
         # Layout horizontal para la entrada
         input_layout = QHBoxLayout()
-        input_layout.setSpacing(10)
+        input_layout.setSpacing(25)
         
-        # Layout vertical para el campo de entrada
-        input_container = QVBoxLayout()
+        # Contenedor para el campo de entrada
+        input_widget = QWidget()
+        input_widget.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                           stop:0 #ffffff, stop:1 #f8f9fa);
+                border: 1px solid #dee2e6;
+                border-radius: 10px;
+                padding: 12px;
+            }
+        """)
+        input_container = QVBoxLayout(input_widget)
+        input_container.setContentsMargins(12, 10, 12, 10)
         
-        # Label para la entrada
-        input_container.addWidget(QLabel("Categoría:"))
+        # Label para la entrada con estilo moderno
+        categoria_label = QLabel("Categoría de la Especie")
+        categoria_label.setStyleSheet("""
+            QLabel {
+                font-size: 15px;
+                font-weight: 600;
+                color: #343a40;
+                margin-bottom: 6px;
+                background: none;
+                border: none;
+                letter-spacing: 0.3px;
+            }
+        """)
+        input_container.addWidget(categoria_label)
         
-        # Campo de entrada con autocompletado
+        # Campo de entrada con autocompletado mejorado
         self.entrada = AutoCompleteLineEdit(self.categorias)
+        self.entrada.setStyleSheet("""
+            QLineEdit {
+                font-size: 14px;
+                padding: 8px 12px;
+                border: 1px solid #ced4da;
+                border-radius: 6px;
+                background-color: #ffffff;
+                color: #495057;
+                min-height: 16px;
+                font-weight: 500;
+            }
+            QLineEdit:focus {
+                border-color: #0d6efd;
+                background-color: #f8f9ff;
+                outline: none;
+                box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.1);
+            }
+            QLineEdit:hover {
+                border-color: #adb5bd;
+            }
+        """)
+        self.entrada.setPlaceholderText("Escribe o selecciona una categoría...")
         self.entrada.returnPressed.connect(self.procesar_clasificacion)
         self.entrada.nextImageSignal.connect(self.siguiente_imagen)
         input_container.addWidget(self.entrada)
         
-        input_layout.addLayout(input_container)
+        # Añadir texto de ayuda
+        help_text = QLabel("Presiona Enter para clasificar, Ctrl para saltar")
+        help_text.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #6c757d;
+                margin-top: 8px;
+                font-style: italic;
+                background: none;
+                border: none;
+            }
+        """)
+        input_container.addWidget(help_text)
+        
+        input_layout.addWidget(input_widget)
+        
+        # Contenedor para imagen de ejemplo
+        ejemplo_widget = QWidget()
+        ejemplo_widget.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                           stop:0 #ffffff, stop:1 #f8f9fa);
+                border: 1px solid #dee2e6;
+                border-radius: 10px;
+                padding: 8px;
+            }
+        """)
+        ejemplo_layout = QVBoxLayout(ejemplo_widget)
+        ejemplo_layout.setContentsMargins(8, 8, 8, 8)
+        
+        # Título para imagen de ejemplo
+        ejemplo_title = QLabel("Imagen de Ejemplo")
+        ejemplo_title.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                font-weight: 600;
+                color: #343a40;
+                margin-bottom: 6px;
+                background: none;
+                border: none;
+                letter-spacing: 0.3px;
+            }
+        """)
+        ejemplo_title.setAlignment(Qt.AlignCenter)
+        ejemplo_layout.addWidget(ejemplo_title)
         
         # Label para mostrar imagen de ejemplo
         self.label_ejemplo = QLabel()
-        self.label_ejemplo.setFixedSize(375, 375)
+        self.label_ejemplo.setFixedSize(280, 280)
         self.label_ejemplo.setAlignment(Qt.AlignCenter)
-        self.label_ejemplo.setStyleSheet("border: 1px solid gray; background-color: #f0f0f0;")
+        self.label_ejemplo.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #dee2e6;
+                border-radius: 8px;
+                background-color: #f8f9fa;
+                color: #6c757d;
+                font-size: 14px;
+            }
+        """)
         self.label_ejemplo.setText("Imagen de ejemplo")
-        input_layout.addWidget(self.label_ejemplo)
+        ejemplo_layout.addWidget(self.label_ejemplo)
+        
+        input_layout.addWidget(ejemplo_widget)
         
         # Conectar el label de ejemplo con el campo de entrada
         self.entrada.set_preview_label(self.label_ejemplo)
         
         layout.addLayout(input_layout)
 
-        # Layout horizontal para las etiquetas inferiores
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(5)
+        # Barra de estado inferior moderna
+        bottom_widget = QWidget()
+        bottom_widget.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border: 1px solid #e9ecef;
+                border-radius: 8px;
+                padding: 10px 15px;
+                margin-top: 10px;
+            }
+        """)
+        bottom_layout = QHBoxLayout(bottom_widget)
+        bottom_layout.setSpacing(15)
+        bottom_layout.setContentsMargins(15, 10, 15, 10)
 
-        # Label para el progreso
+        # Label para el progreso con estilo moderno más grande
         self.label_progreso = QLabel()
+        self.label_progreso.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                color: #007bff;
+                background: none;
+                border: none;
+                padding: 10px 15px;
+                background-color: #e7f3ff;
+                border-radius: 8px;
+                min-height: 30px;
+            }
+        """)
         self.label_progreso.setAlignment(Qt.AlignLeft)
-        self.label_progreso.setMaximumHeight(20)
         bottom_layout.addWidget(self.label_progreso)
 
-        # Label para el nombre de la imagen
+        # Separador visual
+        separator = QLabel("|")
+        separator.setStyleSheet("""
+            QLabel {
+                color: #dee2e6;
+                font-size: 16px;
+                background: none;
+                border: none;
+            }
+        """)
+        separator.setAlignment(Qt.AlignCenter)
+        bottom_layout.addWidget(separator)
+
+        # Label para el nombre de la imagen con estilo moderno
         self.label_nombre_imagen = QLabel()
+        self.label_nombre_imagen.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                color: #6c757d;
+                background: none;
+                border: none;
+                font-family: 'Courier New', monospace;
+                padding: 5px 10px;
+                background-color: #f8f9fa;
+                border-radius: 6px;
+            }
+        """)
         self.label_nombre_imagen.setAlignment(Qt.AlignRight)
-        self.label_nombre_imagen.setMaximumHeight(20)
         bottom_layout.addWidget(self.label_nombre_imagen)
 
-        layout.addLayout(bottom_layout)
+        layout.addWidget(bottom_widget)
 
     def mostrar_imagen_actual(self):
         if self.imagen_actual_index >= len(self.imagenes):
@@ -652,9 +983,13 @@ class ClasificadorImagenes(QMainWindow):
             self.label_ejemplo.clear()
             self.label_ejemplo.setText("Imagen de ejemplo")
 
-        # Actualizar etiqueta de progreso
+        # Actualizar etiqueta de progreso con iconos
+        progreso_actual = self.imagen_actual_index + 1
+        total_imagenes = len(self.imagenes)
+        porcentaje = (progreso_actual / total_imagenes) * 100
+        
         self.label_progreso.setText(
-            f"Imagen {self.imagen_actual_index + 1} de {len(self.imagenes)}"
+            f"Progreso: {progreso_actual}/{total_imagenes} ({porcentaje:.1f}%)"
         )
 
         # Cargar y mostrar imagen
