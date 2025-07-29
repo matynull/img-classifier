@@ -19,6 +19,7 @@ class AutoCompleteLineEdit(QLineEdit):
         self._last_category = ""  # Variable privada para la última categoría
         self._ejemplos_path = "ejemplos"  # Carpeta de ejemplos
         self._preview_label = None  # Label para mostrar la imagen de ejemplo
+        self._last_shown_category = ""  # Última categoría mostrada en imagen de ejemplo
         self.textChanged.connect(self.updateSuggestion)
         self.setCompleter(completevalues)
 
@@ -82,10 +83,11 @@ class AutoCompleteLineEdit(QLineEdit):
                         self.show_example_image(candidate)
                         break
         else:
-            # Si no hay texto, limpiar la imagen de ejemplo
-            if self._preview_label:
+            # Si no hay texto, mantener la última imagen mostrada (no limpiar automáticamente)
+            # Solo limpiar si no hay categoría previa mostrada
+            if self._preview_label and not self._last_shown_category:
                 self._preview_label.clear()
-                self._preview_label.setText("")
+                self._preview_label.setText("Imagen de ejemplo")
         self.update()
 
     def show_example_image(self, categoria):
@@ -102,6 +104,7 @@ class AutoCompleteLineEdit(QLineEdit):
                     scaled_pixmap = pixmap.scaled(280, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     self._preview_label.setPixmap(scaled_pixmap)
                     self._preview_label.setText("")  # Limpiar texto
+                    self._last_shown_category = categoria  # Guardar categoría mostrada
                 else:
                     self._preview_label.clear()
                     self._preview_label.setText("Imagen no válida")
@@ -116,10 +119,15 @@ class AutoCompleteLineEdit(QLineEdit):
         """Sobreescribir clear para asegurar que el texto se limpia completamente"""
         super().clear()
         self.setText("")  # Forzar texto vacío
-        # Limpiar imagen de ejemplo
+        # Mantener la imagen de ejemplo (no limpiar automáticamente)
+        # La imagen se mantendrá hasta que se muestre una nueva categoría
+        
+    def clear_example_image(self):
+        """Limpiar explícitamente la imagen de ejemplo cuando sea necesario"""
+        self._last_shown_category = ""
         if self._preview_label:
             self._preview_label.clear()
-            self._preview_label.setText("")
+            self._preview_label.setText("Imagen de ejemplo")
         
     def setText(self, text):
         """Sobreescribir setText para controlar el texto inicial"""
@@ -134,13 +142,17 @@ class AutoCompleteLineEdit(QLineEdit):
         if self._suggestion and self.text() and len(self._suggestion) > len(self.text()):
             # Calcular el ancho del texto actual
             fm = self.fontMetrics()
-            text_width = fm.width(self.text())
+            text_width = fm.horizontalAdvance(self.text()) if hasattr(fm, 'horizontalAdvance') else fm.width(self.text())
             painter = QPainter(self)
             painter.setPen(Qt.gray)
-            # Calcular la posición en base a los márgenes del QLineEdit
-            x = self.contentsRect().left() + text_width + 2
-            # La posición vertical se alinea con la línea base del texto
-            y = self.contentsRect().bottom() - fm.descent()
+            
+            # Calcular la posición correcta para que esté alineado con el texto
+            content_rect = self.contentsRect()
+            x = content_rect.left() + text_width + 2
+            
+            # Usar la misma línea base que el texto principal
+            y = content_rect.top() + fm.ascent() + (content_rect.height() - fm.height()) // 2
+            
             # Dibujar la parte de la sugerencia que falta
             remaining = self._suggestion[len(self.text()):]
             painter.drawText(x, y, remaining)
@@ -414,7 +426,9 @@ class ClasificadorImagenes(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Clasificador de Especies Marinas")
-        self.setWindowIcon(QIcon("icono.png"))
+        
+        # Establecer icono de pececito para la ventana y barra de tareas
+        self.configurar_icono_ventana()
         
         # Estilo moderno para la ventana principal
         self.setStyleSheet("""
@@ -529,6 +543,34 @@ class ClasificadorImagenes(QMainWindow):
         
         # Mostrar primera imagen
         self.mostrar_imagen_actual()
+
+    def configurar_icono_ventana(self):
+        """Configurar el icono de la ventana y barra de tareas"""
+        # Lista de iconos a probar (en orden de preferencia)
+        icon_files = ["pez_icono.ico", "pez_icono.png", "icono.png"]
+        
+        for icon_file in icon_files:
+            # Probar primero la ruta relativa (para desarrollo)
+            if os.path.exists(icon_file):
+                self.setWindowIcon(QIcon(icon_file))
+                return
+            
+            # Probar la ruta de recursos (para ejecutable PyInstaller)
+            try:
+                # PyInstaller crea una carpeta temporal y almacena la ruta en _MEIPASS
+                base_path = sys._MEIPASS
+                resource_path = os.path.join(base_path, icon_file)
+                if os.path.exists(resource_path):
+                    self.setWindowIcon(QIcon(resource_path))
+                    return
+            except Exception:
+                # Si no es un ejecutable empaquetado, continuar
+                pass
+        
+        # Si no se encuentra ningún icono, crear un icono por defecto
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(QColor(52, 152, 219))  # Azul océano
+        self.setWindowIcon(QIcon(pixmap))
 
     def create_menu(self):
         """Crear menú de la aplicación"""
@@ -1106,12 +1148,8 @@ class ClasificadorImagenes(QMainWindow):
         self.entrada.blockSignals(True)
         self.entrada.clear()
         self.entrada.setText("")  # Forzar texto vacío
+        self.entrada.clear_example_image()  # Limpiar imagen de ejemplo al cargar nueva imagen
         self.entrada.blockSignals(False)
-        
-        # Limpiar imagen de ejemplo
-        if hasattr(self, 'label_ejemplo'):
-            self.label_ejemplo.clear()
-            self.label_ejemplo.setText("Imagen de ejemplo")
 
         # Actualizar etiqueta de progreso con iconos
         progreso_actual = self.imagen_actual_index + 1
