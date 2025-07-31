@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QLabel, QLineEdit, QCompleter, QMessageBox, QDialog, QPushButton,
                            QMenuBar, QAction, QFileDialog, QListWidget, QListWidgetItem, QProgressBar, QFrame,
                            QSizePolicy)
-from PyQt5.QtCore import Qt, QSize, QRect, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, QRect, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QKeySequence
 from PIL import Image
 from pathlib import Path
@@ -740,6 +740,24 @@ class ClasificadorImagenes(QMainWindow):
         self.setup_ui()
         
         # Mostrar primera imagen
+        self.mostrar_imagen_actual()
+
+    def showEvent(self, event):
+        """Se llama cuando la ventana se muestra por primera vez"""
+        super().showEvent(event)
+        # Forzar actualización del layout y mostrar la imagen correctamente
+        if hasattr(self, 'imagen_actual_index'):
+            # Usar QTimer para ejecutar después de que la ventana esté completamente mostrada
+            QTimer.singleShot(100, self.actualizar_imagen_inicial)
+
+    def actualizar_imagen_inicial(self):
+        """Actualizar la primera imagen después de que la ventana esté completamente mostrada"""
+        # Forzar procesamiento de eventos para asegurar que los layouts estén actualizados
+        QApplication.processEvents()
+        self.centralWidget().update()
+        QApplication.processEvents()
+        
+        # Volver a mostrar la imagen actual con las dimensiones correctas
         self.mostrar_imagen_actual()
 
     def configurar_icono_ventana(self):
@@ -1647,10 +1665,37 @@ class ClasificadorImagenes(QMainWindow):
         imagen.save(imagen_path_temp)
         pixmap = QPixmap(imagen_path_temp)
         
+        # Forzar actualización del layout para obtener dimensiones reales de los contenedores
+        # Esto es especialmente importante para la primera imagen
+        QApplication.processEvents()  # Procesar eventos pendientes
+        self.centralWidget().update()  # Actualizar el widget central
+        QApplication.processEvents()  # Procesar eventos de actualización
+        
         # Obtener dimensiones reales del contenedor disponible
-        # Usar el tamaño actual del label que se adapta al contenedor
-        container_width = self.label_imagen.width() if self.label_imagen.width() > 0 else self.image_size[0]
-        container_height = self.label_imagen.height() if self.label_imagen.height() > 0 else self.image_size[1]
+        # Si aún no tienen tamaño real, usar un cálculo basado en la ventana actual
+        container_width = self.label_imagen.width()
+        container_height = self.label_imagen.height()
+        
+        # Si los contenedores aún no tienen tamaño real, calcular basado en la ventana actual
+        if container_width <= 0 or container_height <= 0:
+            # Calcular tamaño real disponible basado en la ventana actual
+            window_width = self.width()
+            window_height = self.height()
+            
+            # Descontar espacio de UI real (más preciso)
+            if self.screen_height <= 800:
+                ui_vertical_space = 280  # Espacio real usado por entrada, progreso, márgenes
+                ui_horizontal_space = 40  # Márgenes laterales
+            else:
+                ui_vertical_space = 320
+                ui_horizontal_space = 60
+            
+            # Calcular espacio disponible para contenedores de imagen
+            available_height = window_height - ui_vertical_space
+            available_width = (window_width - ui_horizontal_space) // 2  # Dividir entre 2 contenedores
+            
+            container_width = max(available_width, 400)  # Mínimo de 400px
+            container_height = max(available_height, 300)  # Mínimo de 300px
         
         # Calcular el factor de escala inteligente
         # Ajustar imagen al contenedor pero NUNCA reducir por debajo de un tamaño mínimo útil
@@ -1723,8 +1768,13 @@ class ClasificadorImagenes(QMainWindow):
             pixmap_zoom = QPixmap("temp_zoom.png")
             
             # Obtener dimensiones reales del contenedor de zoom disponible
-            zoom_container_width = self.label_zoom.width() if self.label_zoom.width() > 0 else self.image_size[0]
-            zoom_container_height = self.label_zoom.height() if self.label_zoom.height() > 0 else self.image_size[1]
+            zoom_container_width = self.label_zoom.width()
+            zoom_container_height = self.label_zoom.height()
+            
+            # Si los contenedores de zoom aún no tienen tamaño real, usar el mismo cálculo
+            if zoom_container_width <= 0 or zoom_container_height <= 0:
+                zoom_container_width = container_width  # Usar el mismo tamaño que se calculó para la imagen principal
+                zoom_container_height = container_height
             
             # Obtener dimensiones de la imagen recortada
             zoom_original_width = imagen_recortada.size[0]  # Usar PIL para obtener tamaño real
