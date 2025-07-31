@@ -3,7 +3,8 @@ import sys
 import shutil
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QLabel, QLineEdit, QCompleter, QMessageBox, QDialog, QPushButton,
-                           QMenuBar, QAction, QFileDialog, QListWidget, QListWidgetItem, QProgressBar, QFrame)
+                           QMenuBar, QAction, QFileDialog, QListWidget, QListWidgetItem, QProgressBar, QFrame,
+                           QSizePolicy)
 from PyQt5.QtCore import Qt, QSize, QRect, pyqtSignal
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor, QIcon, QKeySequence
 from PIL import Image
@@ -20,6 +21,7 @@ class AutoCompleteLineEdit(QLineEdit):
         self._ejemplos_path = "ejemplos"  # Carpeta de ejemplos
         self._preview_label = None  # Label para mostrar la imagen de ejemplo
         self._last_shown_category = ""  # Última categoría mostrada en imagen de ejemplo
+        self._skip_key = Qt.Key_Control  # Tecla por defecto para skip (Control)
         self.textChanged.connect(self.updateSuggestion)
         self.setCompleter(completevalues)
 
@@ -39,8 +41,17 @@ class AutoCompleteLineEdit(QLineEdit):
             if not self.text() and self.placeholderText():
                 self.setText(self.placeholderText())
             event.accept()
-        elif event.key() == Qt.Key_Control:
+        elif event.key() == self._skip_key:  # Tecla configurable para skip
             self.nextImageSignal.emit()  # Emitir señal para siguiente imagen
+            event.accept()
+            return
+        elif event.key() == Qt.Key_Left or event.key() == Qt.Key_Right:
+            # Pasar eventos de flechas al widget principal
+            parent = self.parent()
+            while parent and not isinstance(parent, ClasificadorImagenes):
+                parent = parent.parent()
+            if parent:
+                parent.keyPressEvent(event)
             event.accept()
             return
         super().keyPressEvent(event)
@@ -100,20 +111,73 @@ class AutoCompleteLineEdit(QLineEdit):
             try:
                 pixmap = QPixmap(ejemplo_path)
                 if not pixmap.isNull():
-                    # Escalar la imagen manteniendo la proporción
-                    scaled_pixmap = pixmap.scaled(280, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    # Obtener el tamaño del contenedor de la imagen de ejemplo
+                    container_width = self._preview_label.width()
+                    container_height = self._preview_label.height()
+                    
+                    # Si el contenedor aún no tiene tamaño, usar valores por defecto según resolución
+                    if container_width <= 0 or container_height <= 0:
+                        # Intentar obtener resolución desde el parent
+                        parent = self._preview_label
+                        screen_height = 1080  # Valor por defecto
+                        while parent:
+                            if hasattr(parent, 'screen_height'):
+                                screen_height = parent.screen_height
+                                break
+                            parent = parent.parent()
+                        
+                        if screen_height <= 800:
+                            container_width = container_height = 160  # Actualizado de 120 a 160 para 720p
+                        else:
+                            container_width = container_height = 280  # Tamaño normal
+                    
+                    # Calcular la proporción de la imagen original
+                    original_width = pixmap.width()
+                    original_height = pixmap.height()
+                    
+                    # Calcular el factor de escala para que la imagen entre completamente en el contenedor
+                    # Dejar un pequeño margen (95% del contenedor) para evitar cortes
+                    usable_width = int(container_width * 0.95)
+                    usable_height = int(container_height * 0.95)
+                    
+                    scale_factor_width = usable_width / original_width
+                    scale_factor_height = usable_height / original_height
+                    scale_factor = min(scale_factor_width, scale_factor_height)
+                    
+                    # Asegurar que el factor de escala no sea demasiado pequeño (mínimo 0.1)
+                    scale_factor = max(scale_factor, 0.1)
+                    
+                    # Calcular el nuevo tamaño manteniendo la proporción
+                    new_width = int(original_width * scale_factor)
+                    new_height = int(original_height * scale_factor)
+                    
+                    # Escalar la imagen manteniendo la proporción y calidad
+                    scaled_pixmap = pixmap.scaled(new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     self._preview_label.setPixmap(scaled_pixmap)
                     self._preview_label.setText("")  # Limpiar texto
                     self._last_shown_category = categoria  # Guardar categoría mostrada
+                    
+                    # Si es un ClickableImageLabel, establecer la ruta de la imagen
+                    if hasattr(self._preview_label, 'set_image_path'):
+                        self._preview_label.set_image_path(ejemplo_path)
                 else:
                     self._preview_label.clear()
                     self._preview_label.setText("Imagen no válida")
+                    # Limpiar la ruta de imagen si es un ClickableImageLabel
+                    if hasattr(self._preview_label, 'set_image_path'):
+                        self._preview_label.set_image_path(None)
             except Exception as e:
                 self._preview_label.clear()
                 self._preview_label.setText("Error al cargar imagen")
+                # Limpiar la ruta de imagen si es un ClickableImageLabel
+                if hasattr(self._preview_label, 'set_image_path'):
+                    self._preview_label.set_image_path(None)
         else:
             self._preview_label.clear()
             self._preview_label.setText("Sin ejemplo")
+            # Limpiar la ruta de imagen si es un ClickableImageLabel
+            if hasattr(self._preview_label, 'set_image_path'):
+                self._preview_label.set_image_path(None)
 
     def clear(self):
         """Sobreescribir clear para asegurar que el texto se limpia completamente"""
@@ -163,7 +227,10 @@ class ImageLabel(QLabel):
         self.bbox = None
         self.original_size = None
         self.setAlignment(Qt.AlignCenter)
-        self.setMinimumSize(QSize(size[0], size[1]))
+        # Configurar para que use todo el espacio disponible
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # No establecer tamaño mínimo fijo, permitir que el layout maneje el tamaño
+        # Esto permite que el widget se adapte completamente al contenedor
         self.drawing = False
         self.start_point = None
         self.current_bbox = None
@@ -301,6 +368,117 @@ class ImageLabel(QLabel):
             y2 = pixmap_rect.y() + int(self.current_bbox[3] * scale_y)
             painter.drawRect(x1, y1, x2 - x1, y2 - y1)
 
+class ClickableImageLabel(QLabel):
+    """Label de imagen que permite hacer click para abrir en una ventana más grande"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_image_path = None
+        self.setCursor(Qt.PointingHandCursor)  # Cursor de mano para indicar que es clickeable
+        
+    def set_image_path(self, image_path):
+        """Establece la ruta de la imagen actual para poder abrirla en grande"""
+        self.current_image_path = image_path
+        
+    def mousePressEvent(self, event):
+        """Maneja el click en la imagen"""
+        if event.button() == Qt.LeftButton and self.current_image_path and os.path.exists(self.current_image_path):
+            self.show_full_image()
+        super().mousePressEvent(event)
+        
+    def show_full_image(self):
+        """Muestra la imagen en una ventana más grande"""
+        if not self.current_image_path or not os.path.exists(self.current_image_path):
+            return
+            
+        # Crear diálogo para mostrar la imagen en grande
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Vista Completa de Ejemplo")
+        dialog.setModal(True)
+        
+        # Configurar tamaño del diálogo basado en la resolución
+        parent_window = self.window()
+        if hasattr(parent_window, 'screen_height'):
+            if parent_window.screen_height <= 800:
+                dialog_size = 400  # Más pequeño para 720p
+            else:
+                dialog_size = 600  # Más grande para otras resoluciones
+        else:
+            dialog_size = 500
+            
+        dialog.resize(dialog_size, dialog_size)
+        
+        # Layout para el diálogo
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Label para mostrar la imagen grande
+        image_label = QLabel()
+        image_label.setAlignment(Qt.AlignCenter)
+        image_label.setStyleSheet("""
+            QLabel {
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                background-color: #ffffff;
+                padding: 5px;
+            }
+        """)
+        
+        # Cargar y escalar la imagen
+        try:
+            pixmap = QPixmap(self.current_image_path)
+            if not pixmap.isNull():
+                # Calcular tamaño máximo (90% del diálogo)
+                max_size = int(dialog_size * 0.9)
+                scaled_pixmap = pixmap.scaled(max_size, max_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                image_label.setPixmap(scaled_pixmap)
+            else:
+                image_label.setText("Error al cargar la imagen")
+        except Exception as e:
+            image_label.setText(f"Error: {str(e)}")
+        
+        layout.addWidget(image_label)
+        
+        # Botón para cerrar
+        close_button = QPushButton("Cerrar")
+        close_button.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 6px;
+                border: none;
+                background-color: #6c757d;
+                color: white;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #545b62;
+            }
+            QPushButton:pressed {
+                background-color: #495057;
+            }
+        """)
+        close_button.clicked.connect(dialog.close)
+        
+        # Layout para el botón (centrado)
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(close_button)
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
+        
+        # Centrar el diálogo en la pantalla
+        dialog.move(
+            parent_window.x() + (parent_window.width() - dialog.width()) // 2,
+            parent_window.y() + (parent_window.height() - dialog.height()) // 2
+        )
+        
+        # Mostrar el diálogo
+        dialog.exec_()
+
 class ClassificationDialog(QDialog):
     def __init__(self, categorias, parent=None):
         super().__init__(parent)
@@ -430,44 +608,82 @@ class ClasificadorImagenes(QMainWindow):
         # Establecer icono de pececito para la ventana y barra de tareas
         self.configurar_icono_ventana()
         
+        # Obtener la resolución de la pantalla PRIMERO
+        screen = QApplication.primaryScreen().geometry()
+        self.screen_width = screen.width()
+        self.screen_height = screen.height()
+        
         # Estilo moderno para la ventana principal
-        self.setStyleSheet("""
-            QMainWindow {
+        # Ajustar tamaños de fuente según resolución
+        if self.screen_height <= 800:
+            menu_font_size = "11px"
+            menu_padding = "4px 8px"
+        else:
+            menu_font_size = "14px"
+            menu_padding = "8px 12px"
+            
+        self.setStyleSheet(f"""
+            QMainWindow {{
                 background-color: #f8f9fa;
-            }
-            QMenuBar {
+            }}
+            QMenuBar {{
                 background-color: #ffffff;
                 border-bottom: 1px solid #e9ecef;
                 padding: 5px;
-                font-size: 14px;
-            }
-            QMenuBar::item {
+                font-size: {menu_font_size};
+            }}
+            QMenuBar::item {{
                 background-color: transparent;
-                padding: 8px 12px;
+                padding: {menu_padding};
                 border-radius: 4px;
-            }
-            QMenuBar::item:selected {
+            }}
+            QMenuBar::item:selected {{
                 background-color: #e9ecef;
-            }
-            QMenu {
+            }}
+            QMenu {{
                 background-color: white;
                 border: 1px solid #dee2e6;
                 border-radius: 6px;
                 padding: 5px;
-            }
-            QMenu::item {
+            }}
+            QMenu::item {{
                 padding: 8px 20px;
                 border-radius: 4px;
-            }
-            QMenu::item:selected {
+            }}
+            QMenu::item:selected {{
                 background-color: #e9ecef;
-            }
+            }}
         """)
         
-        # Obtener la resolución de la pantalla
-        screen = QApplication.primaryScreen().geometry()
-        window_width = int(screen.width() * 0.8)
-        window_height = int(screen.height() * 0.8)
+        # Ajustar tamaños según la resolución
+        if self.screen_height <= 800:  # 720p y resoluciones similares (1366x768)
+            window_width = int(self.screen_width * 0.98)  # Usar casi todo el ancho
+            window_height = int(self.screen_height * 0.95)  # Usar casi toda la altura
+            # Calcular espacio disponible para imágenes descontando UI REAL
+            ui_space = 350  # Espacio real para menú(30) + entrada(120) + estadísticas(80) + barra inferior(120)
+            available_height = window_height - ui_space
+            available_width = (window_width - 60) // 2  # Dividir en 2 para las dos imágenes, descontar márgenes
+            self.image_size = (available_width, available_height)
+            self.container_width = available_width
+        elif self.screen_height <= 1080:  # 1080p
+            window_width = int(self.screen_width * 0.85)
+            window_height = int(self.screen_height * 0.85)
+            # Calcular espacio disponible para imágenes descontando UI REAL
+            ui_space = 400  # Más espacio para UI en resoluciones altas
+            available_height = window_height - ui_space
+            available_width = (window_width - 80) // 2
+            self.image_size = (available_width, available_height)
+            self.container_width = available_width
+        else:  # 2K o superior
+            window_width = int(self.screen_width * 0.8)
+            window_height = int(self.screen_height * 0.8)
+            # Calcular espacio disponible para imágenes descontando UI REAL
+            ui_space = 450  # Más espacio para UI en resoluciones altas
+            available_height = window_height - ui_space
+            available_width = (window_width - 100) // 2
+            self.image_size = (available_width, available_height)
+            self.container_width = available_width
+        
         self.setMinimumSize(window_width, window_height)
         
         # Variables de estado
@@ -484,39 +700,21 @@ class ClasificadorImagenes(QMainWindow):
         
         # Layout principal
         layout = QVBoxLayout(central_widget)
+        # Ajustar espaciado según resolución
+        if self.screen_height <= 800:
+            layout.setSpacing(1)  # Espaciado ultra mínimo para 720p
+            layout.setContentsMargins(2, 2, 2, 1)  # Márgenes ultra mínimos
+        else:
+            layout.setSpacing(10)
+            layout.setContentsMargins(15, 15, 15, 10)
         
         # Crear menú
         self.create_menu()
         
-        # Obtener la resolución de la pantalla
-        screen = QApplication.primaryScreen()
-        screen_size = screen.size()
-        screen_height = screen_size.height()
-
-        # Ajustar tamaños según la resolución
-        # Para 720p y resoluciones similares (1280x720, 1366x768)
-        if screen_height <= 800:
-            self.window_width = 1000
-            self.window_height = 620
-            self.container_width = 450
-            self.image_size = (450, 350)
-        # Para 1080p (1920x1080)
-        elif screen_height <= 1080:
-            self.window_width = 1500
-            self.window_height = 950
-            self.container_width = 700
-            self.image_size = (700, 550)
-        # Para 2K (2560x1440) o superior
-        else:
-            self.window_width = 1900
-            self.window_height = 1250
-            self.container_width = 900
-            self.image_size = (900, 700)
-
-        # Configurar la ventana
-        self.setGeometry(100, 100, self.window_width, self.window_height)
-        self.setFixedSize(self.window_width, self.window_height)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowMaximizeButtonHint)
+        # Configurar la ventana con tamaños dinámicos
+        self.resize(window_width, window_height)
+        # Permitir maximizar la ventana
+        # self.showMaximized()
 
         # Cargar categorías
         self.categorias = self.cargar_categorias()
@@ -584,6 +782,15 @@ class ClasificadorImagenes(QMainWindow):
         cargar_ejemplos_action.setStatusTip('Cargar imágenes de ejemplo para cada categoría')
         cargar_ejemplos_action.triggered.connect(self.cargar_ejemplos)
         tools_menu.addAction(cargar_ejemplos_action)
+        
+        # Separador
+        tools_menu.addSeparator()
+        
+        # Acción para configurar tecla de skip
+        configurar_skip_action = QAction('Configurar Tecla de Skip', self)
+        configurar_skip_action.setStatusTip('Cambiar la tecla para saltar imágenes')
+        configurar_skip_action.triggered.connect(self.configurar_tecla_skip)
+        tools_menu.addAction(configurar_skip_action)
 
     def cargar_ejemplos(self):
         """Cargar imágenes de ejemplo para cada categoría"""
@@ -658,6 +865,91 @@ class ClasificadorImagenes(QMainWindow):
         
         QMessageBox.information(self, "Completado", "Proceso de carga de ejemplos completado.")
 
+    def configurar_tecla_skip(self):
+        """Configurar la tecla para saltar imágenes"""
+        from PyQt5.QtWidgets import QInputDialog
+        
+        # Mapeo de teclas comunes para mostrar nombres amigables
+        teclas_disponibles = {
+            'Backtick (`)': Qt.Key_QuoteLeft,
+            'Shift': Qt.Key_Shift,
+            'Alt': Qt.Key_Alt,
+            'Control': Qt.Key_Control,
+            'Espacio': Qt.Key_Space,
+            'Tab': Qt.Key_Tab,
+            'Escape': Qt.Key_Escape,
+            'F1': Qt.Key_F1,
+            'F2': Qt.Key_F2,
+            'F3': Qt.Key_F3,
+            'F4': Qt.Key_F4,
+            'F5': Qt.Key_F5,
+            'F6': Qt.Key_F6,
+            'F7': Qt.Key_F7,
+            'F8': Qt.Key_F8,
+            'F9': Qt.Key_F9,
+            'F10': Qt.Key_F10,
+            'F11': Qt.Key_F11,
+            'F12': Qt.Key_F12,
+        }
+        
+        # Obtener la tecla actual
+        tecla_actual = None
+        for nombre, tecla in teclas_disponibles.items():
+            if tecla == self.entrada._skip_key:
+                tecla_actual = nombre
+                break
+        
+        # Crear lista de opciones
+        opciones = list(teclas_disponibles.keys())
+        
+        # Mostrar diálogo de selección
+        tecla_seleccionada, ok = QInputDialog.getItem(
+            self, 
+            "Configurar Tecla de Skip",
+            f"Selecciona la tecla para saltar imágenes:\n(Actual: {tecla_actual})",
+            opciones,
+            opciones.index(tecla_actual) if tecla_actual in opciones else 0,
+            False
+        )
+        
+        if ok and tecla_seleccionada:
+            # Actualizar la tecla de skip
+            self.entrada._skip_key = teclas_disponibles[tecla_seleccionada]
+            
+            # Actualizar el texto de ayuda
+            self.actualizar_texto_ayuda()
+            
+            QMessageBox.information(
+                self, 
+                "Configuración Guardada", 
+                f"Tecla de skip cambiada a: {tecla_seleccionada}"
+            )
+
+    def actualizar_texto_ayuda(self):
+        """Actualizar el texto de ayuda con la tecla de skip actual"""
+        # Mapeo inverso para obtener el nombre de la tecla
+        tecla_nombre = "`"  # Por defecto
+        if self.entrada._skip_key == Qt.Key_Shift:
+            tecla_nombre = "Shift"
+        elif self.entrada._skip_key == Qt.Key_Alt:
+            tecla_nombre = "Alt"
+        elif self.entrada._skip_key == Qt.Key_Control:
+            tecla_nombre = "Ctrl"
+        elif self.entrada._skip_key == Qt.Key_Space:
+            tecla_nombre = "Espacio"
+        elif self.entrada._skip_key == Qt.Key_Tab:
+            tecla_nombre = "Tab"
+        elif self.entrada._skip_key == Qt.Key_Escape:
+            tecla_nombre = "Esc"
+        elif Qt.Key_F1 <= self.entrada._skip_key <= Qt.Key_F12:
+            tecla_nombre = f"F{self.entrada._skip_key - Qt.Key_F1 + 1}"
+        
+        # Buscar el label de ayuda y actualizarlo
+        for child in self.findChildren(QLabel):
+            if "Enter: clasificar" in child.text():
+                child.setText(f"Enter: clasificar | {tecla_nombre}: saltar | ◀ ▶: navegar")
+                break
+
     def resize_example_image(self, image_path):
         """Redimensionar imagen de ejemplo para optimizar espacio"""
         try:
@@ -721,12 +1013,21 @@ class ClasificadorImagenes(QMainWindow):
         """)
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 15)
+        # Ajustar espaciado y márgenes según resolución para dar más espacio a las imágenes
+        if self.screen_height <= 800:
+            layout.setSpacing(5)  # Espaciado reducido para 720p
+            layout.setContentsMargins(8, 8, 8, 8)  # Márgenes reducidos para dar más espacio
+        else:
+            layout.setSpacing(15)
+            layout.setContentsMargins(20, 20, 20, 15)
 
         # Layout horizontal para las imágenes
         images_layout = QHBoxLayout()
-        images_layout.setSpacing(25)
+        # Ajustar espaciado según resolución
+        if self.screen_height <= 800:
+            images_layout.setSpacing(5)  # Espaciado reducido para 720p para dar más espacio a las imágenes
+        else:
+            images_layout.setSpacing(15)
 
         # Contenedor para la imagen original
         left_container = QWidget()
@@ -740,20 +1041,32 @@ class ClasificadorImagenes(QMainWindow):
             }
         """)
         left_layout = QVBoxLayout(left_container)
-        left_layout.setContentsMargins(2, 2, 2, 2)
+        # Ajustar márgenes según resolución
+        if self.screen_height <= 800:
+            left_layout.setContentsMargins(4, 4, 4, 4)  # Márgenes reducidos para 720p
+        else:
+            left_layout.setContentsMargins(2, 2, 2, 2)
         
         # Título para la imagen original
         original_title = QLabel("Imagen Original")
-        original_title.setStyleSheet("""
-            QLabel {
-                font-size: 15px;
+        # Ajustar tamaño de fuente según resolución
+        if self.screen_height <= 800:
+            title_font_size = "11px"
+            title_margin = "4px"
+        else:
+            title_font_size = "15px"
+            title_margin = "8px"
+            
+        original_title.setStyleSheet(f"""
+            QLabel {{
+                font-size: {title_font_size};
                 font-weight: 600;
                 color: #343a40;
-                margin-bottom: 8px;
+                margin-bottom: {title_margin};
                 background: none;
                 border: none;
                 letter-spacing: 0.5px;
-            }
+            }}
         """)
         original_title.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(original_title)
@@ -768,12 +1081,18 @@ class ClasificadorImagenes(QMainWindow):
                 padding: 0px;
             }
         """)
-        left_layout.addWidget(self.label_imagen)
-        images_layout.addWidget(left_container)
+        # Configurar para que use todo el espacio disponible sin restricciones fijas
+        self.label_imagen.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Remover setMinimumSize fijo para permitir adaptación completa al contenedor
+        self.label_imagen.setMinimumSize(200, 200)  # Solo un mínimo básico para evitar colapso
+        
+        left_layout.addWidget(self.label_imagen, 1)  # stretch=1 para que ocupe todo el espacio
+        images_layout.addWidget(left_container, 1)  # stretch=1 para distribución proporcional
 
         # Contenedor para la imagen con zoom
         right_container = QWidget()
-        right_container.setFixedWidth(self.container_width)
+        # Eliminar ancho fijo para permitir escalado automático
+        # right_container.setFixedWidth(self.container_width)
         right_container.setStyleSheet("""
             QWidget {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
@@ -784,20 +1103,24 @@ class ClasificadorImagenes(QMainWindow):
             }
         """)
         right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(2, 2, 2, 2)
+        # Ajustar márgenes según resolución
+        if self.screen_height <= 800:
+            right_layout.setContentsMargins(4, 4, 4, 4)  # Márgenes reducidos para 720p
+        else:
+            right_layout.setContentsMargins(2, 2, 2, 2)
         
         # Título para la imagen con zoom
         zoom_title = QLabel("Vista Detallada")
-        zoom_title.setStyleSheet("""
-            QLabel {
-                font-size: 15px;
+        zoom_title.setStyleSheet(f"""
+            QLabel {{
+                font-size: {title_font_size};
                 font-weight: 600;
                 color: #343a40;
-                margin-bottom: 8px;
+                margin-bottom: {title_margin};
                 background: none;
                 border: none;
                 letter-spacing: 0.5px;
-            }
+            }}
         """)
         zoom_title.setAlignment(Qt.AlignCenter)
         right_layout.addWidget(zoom_title)
@@ -812,41 +1135,66 @@ class ClasificadorImagenes(QMainWindow):
                 padding: 0px;
             }
         """)
-        right_layout.addWidget(self.label_zoom)
-        images_layout.addWidget(right_container)
+        # Configurar para que use todo el espacio disponible sin restricciones fijas
+        self.label_zoom.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Remover setMinimumSize fijo para permitir adaptación completa al contenedor
+        self.label_zoom.setMinimumSize(200, 200)  # Solo un mínimo básico para evitar colapso
+        
+        right_layout.addWidget(self.label_zoom, 1)  # stretch=1 para que ocupe todo el espacio
+        images_layout.addWidget(right_container, 1)  # stretch=1 para distribución proporcional
 
         layout.addLayout(images_layout)
 
         # Layout horizontal para la entrada
         input_layout = QHBoxLayout()
-        input_layout.setSpacing(25)
+        # Ajustar espaciado según resolución
+        if self.screen_height <= 800:
+            input_layout.setSpacing(5)  # Espaciado reducido para 720p
+        else:
+            input_layout.setSpacing(15)
         
         # Contenedor para el campo de entrada
         input_widget = QWidget()
-        input_widget.setStyleSheet("""
-            QWidget {
+        # Ajustar padding del contenedor según resolución
+        if self.screen_height <= 800:
+            container_padding = "6px"  # Padding reducido para dar más espacio a las imágenes
+            container_margins = "6, 4, 6, 4"  # Márgenes reducidos
+        else:
+            container_padding = "12px"
+            container_margins = "12, 10, 12, 10"
+            
+        input_widget.setStyleSheet(f"""
+            QWidget {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
                            stop:0 #ffffff, stop:1 #f8f9fa);
                 border: 1px solid #dee2e6;
                 border-radius: 10px;
-                padding: 12px;
-            }
+                padding: {container_padding};
+            }}
         """)
         input_container = QVBoxLayout(input_widget)
-        input_container.setContentsMargins(12, 10, 12, 10)
+        input_container.setContentsMargins(int(container_margins.split(',')[0]), int(container_margins.split(',')[1]), int(container_margins.split(',')[2]), int(container_margins.split(',')[3]))
         
         # Label para la entrada con estilo moderno
         categoria_label = QLabel("Categoría de la Especie")
-        categoria_label.setStyleSheet("""
-            QLabel {
-                font-size: 15px;
+        # Ajustar tamaño de label según resolución
+        if self.screen_height <= 800:
+            label_font_size = "11px"
+            label_margin = "3px"
+        else:
+            label_font_size = "15px"
+            label_margin = "6px"
+            
+        categoria_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: {label_font_size};
                 font-weight: 600;
                 color: #343a40;
-                margin-bottom: 6px;
+                margin-bottom: {label_margin};
                 background: none;
                 border: none;
                 letter-spacing: 0.3px;
-            }
+            }}
         """)
         input_container.addWidget(categoria_label)
         
@@ -856,39 +1204,57 @@ class ClasificadorImagenes(QMainWindow):
         
         # Botón anterior
         self.btn_anterior = QPushButton("◀")
-        self.btn_anterior.setStyleSheet("""
-            QPushButton {
-                font-size: 16px;
+        # Ajustar tamaño de botones según resolución
+        if self.screen_height <= 800:
+            btn_font_size = "12px"
+            btn_padding = "4px 6px"
+            btn_width = "30px"
+        else:
+            btn_font_size = "16px"
+            btn_padding = "8px 12px"
+            btn_width = "40px"
+            
+        self.btn_anterior.setStyleSheet(f"""
+            QPushButton {{
+                font-size: {btn_font_size};
                 font-weight: bold;
-                padding: 8px 12px;
+                padding: {btn_padding};
                 border: 1px solid #ced4da;
                 border-radius: 6px;
                 background-color: #ffffff;
                 color: #495057;
-                min-width: 40px;
-                max-width: 40px;
-            }
-            QPushButton:hover {
+                min-width: {btn_width};
+                max-width: {btn_width};
+            }}
+            QPushButton:hover {{
                 background-color: #e9ecef;
                 border-color: #adb5bd;
-            }
-            QPushButton:pressed {
+            }}
+            QPushButton:pressed {{
                 background-color: #dee2e6;
-            }
-            QPushButton:disabled {
+            }}
+            QPushButton:disabled {{
                 background-color: #f8f9fa;
                 color: #ced4da;
                 border-color: #e9ecef;
-            }
+            }}
         """)
         self.btn_anterior.clicked.connect(self.imagen_anterior)
         entrada_nav_layout.addWidget(self.btn_anterior)
         
         # Campo de entrada con autocompletado mejorado (más ancho)
         self.entrada = AutoCompleteLineEdit(self.categorias)
-        self.entrada.setStyleSheet("""
-            QLineEdit {
-                font-size: 15px;
+        # Ajustar tamaño según resolución
+        if self.screen_height <= 800:
+            min_width = "200px"  # Tamaño normal para el campo de entrada
+            font_size = "12px"  # Fuente legible
+        else:
+            min_width = "300px"
+            font_size = "15px"
+            
+        self.entrada.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: {font_size};
                 padding: 10px 15px;
                 border: 1px solid #ced4da;
                 border-radius: 6px;
@@ -896,17 +1262,16 @@ class ClasificadorImagenes(QMainWindow):
                 color: #495057;
                 min-height: 20px;
                 font-weight: 500;
-                min-width: 300px;
-            }
-            QLineEdit:focus {
+                min-width: {min_width};
+            }}
+            QLineEdit:focus {{
                 border-color: #0d6efd;
                 background-color: #f8f9ff;
                 outline: none;
-                box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.1);
-            }
-            QLineEdit:hover {
+            }}
+            QLineEdit:hover {{
                 border-color: #adb5bd;
-            }
+            }}
         """)
         self.entrada.setPlaceholderText("Escribe o selecciona una categoría...")
         self.entrada.returnPressed.connect(self.procesar_clasificacion)
@@ -915,30 +1280,30 @@ class ClasificadorImagenes(QMainWindow):
         
         # Botón siguiente
         self.btn_siguiente = QPushButton("▶")
-        self.btn_siguiente.setStyleSheet("""
-            QPushButton {
-                font-size: 16px;
+        self.btn_siguiente.setStyleSheet(f"""
+            QPushButton {{
+                font-size: {btn_font_size};
                 font-weight: bold;
-                padding: 8px 12px;
+                padding: {btn_padding};
                 border: 1px solid #ced4da;
                 border-radius: 6px;
                 background-color: #ffffff;
                 color: #495057;
-                min-width: 40px;
-                max-width: 40px;
-            }
-            QPushButton:hover {
+                min-width: {btn_width};
+                max-width: {btn_width};
+            }}
+            QPushButton:hover {{
                 background-color: #e9ecef;
                 border-color: #adb5bd;
-            }
-            QPushButton:pressed {
+            }}
+            QPushButton:pressed {{
                 background-color: #dee2e6;
-            }
-            QPushButton:disabled {
+            }}
+            QPushButton:disabled {{
                 background-color: #f8f9fa;
                 color: #ced4da;
                 border-color: #e9ecef;
-            }
+            }}
         """)
         self.btn_siguiente.clicked.connect(self.imagen_siguiente)
         entrada_nav_layout.addWidget(self.btn_siguiente)
@@ -948,44 +1313,68 @@ class ClasificadorImagenes(QMainWindow):
         # Separador visual
         separador = QFrame()
         separador.setFrameShape(QFrame.HLine)
-        separador.setStyleSheet("""
-            QFrame {
+        # Ajustar separador según resolución
+        if self.screen_height <= 800:
+            separator_margin = "4px 0px"
+        else:
+            separator_margin = "8px 0px"
+            
+        separador.setStyleSheet(f"""
+            QFrame {{
                 color: #dee2e6;
-                margin: 8px 0px;
-            }
+                margin: {separator_margin};
+            }}
         """)
         input_container.addWidget(separador)
         
         # Estadísticas de clasificación (aesthetic)
         self.stats_label = QLabel()
-        self.stats_label.setStyleSheet("""
-            QLabel {
-                font-size: 12px;
+        # Ajustar tamaño de estadísticas según resolución
+        if self.screen_height <= 800:
+            stats_font_size = "10px"
+            stats_padding = "4px 6px"
+            stats_margin = "2px 0px"
+        else:
+            stats_font_size = "12px"
+            stats_padding = "8px 12px"
+            stats_margin = "4px 0px"
+            
+        self.stats_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: {stats_font_size};
                 color: #495057;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                            stop:0 #e3f2fd, stop:1 #f3e5f5);
                 border: 1px solid #bbdefb;
                 border-radius: 6px;
-                padding: 8px 12px;
-                margin: 4px 0px;
+                padding: {stats_padding};
+                margin: {stats_margin};
                 font-weight: 500;
-            }
+            }}
         """)
         self.stats_label.setAlignment(Qt.AlignCenter)
         input_container.addWidget(self.stats_label)
         
         # Añadir texto de ayuda
         help_text = QLabel("Enter: clasificar | Ctrl: saltar | ◀ ▶: navegar")
-        help_text.setStyleSheet("""
-            QLabel {
-                font-size: 11px;
+        # Ajustar tamaño de ayuda según resolución
+        if self.screen_height <= 800:
+            help_font_size = "9px"
+            help_margin = "2px"
+        else:
+            help_font_size = "11px"
+            help_margin = "6px"
+            
+        help_text.setStyleSheet(f"""
+            QLabel {{
+                font-size: {help_font_size};
                 color: #6c757d;
-                margin-top: 6px;
+                margin-top: {help_margin};
                 font-style: italic;
                 background: none;
                 border: none;
                 text-align: center;
-            }
+            }}
         """)
         help_text.setAlignment(Qt.AlignCenter)
         input_container.addWidget(help_text)
@@ -994,38 +1383,70 @@ class ClasificadorImagenes(QMainWindow):
         
         # Contenedor para imagen de ejemplo
         ejemplo_widget = QWidget()
-        ejemplo_widget.setStyleSheet("""
-            QWidget {
+        # Ajustar el contenedor según resolución
+        if self.screen_height <= 800:
+            # Para 720p: contenedor más compacto con padding reducido
+            ejemplo_padding = "4px"
+            ejemplo_margins = "4, 4, 4, 4"
+        else:
+            # Para resoluciones mayores: padding normal
+            ejemplo_padding = "8px"
+            ejemplo_margins = "8, 8, 8, 8"
+            
+        ejemplo_widget.setStyleSheet(f"""
+            QWidget {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
                            stop:0 #ffffff, stop:1 #f8f9fa);
                 border: 1px solid #dee2e6;
                 border-radius: 10px;
-                padding: 8px;
-            }
+                padding: {ejemplo_padding};
+            }}
         """)
         ejemplo_layout = QVBoxLayout(ejemplo_widget)
-        ejemplo_layout.setContentsMargins(8, 8, 8, 8)
+        ejemplo_layout.setContentsMargins(int(ejemplo_margins.split(',')[0]), int(ejemplo_margins.split(',')[1]), int(ejemplo_margins.split(',')[2]), int(ejemplo_margins.split(',')[3]))
         
         # Título para imagen de ejemplo
         ejemplo_title = QLabel("Imagen de Ejemplo")
-        ejemplo_title.setStyleSheet("""
-            QLabel {
-                font-size: 13px;
+        # Ajustar tamaño de fuente según resolución
+        if self.screen_height <= 800:
+            ejemplo_font_size = "10px"
+            ejemplo_margin = "3px"
+        else:
+            ejemplo_font_size = "13px"
+            ejemplo_margin = "6px"
+            
+        ejemplo_title.setStyleSheet(f"""
+            QLabel {{
+                font-size: {ejemplo_font_size};
                 font-weight: 600;
                 color: #343a40;
-                margin-bottom: 6px;
+                margin-bottom: {ejemplo_margin};
                 background: none;
                 border: none;
                 letter-spacing: 0.3px;
-            }
+            }}
         """)
         ejemplo_title.setAlignment(Qt.AlignCenter)
         ejemplo_layout.addWidget(ejemplo_title)
         
         # Label para mostrar imagen de ejemplo
-        self.label_ejemplo = QLabel()
-        self.label_ejemplo.setFixedSize(280, 280)
+        self.label_ejemplo = ClickableImageLabel()  # Usar la nueva clase clickeable
+        # Configurar tamaño adaptativo según resolución
+        if self.screen_height <= 800:
+            # Para 720p: contenedor más grande para mejor visualización
+            ejemplo_container_size = 160  # Aumentado de 120 a 160 para mejor visibilidad
+            self.label_ejemplo.setMinimumSize(ejemplo_container_size, ejemplo_container_size)
+            self.label_ejemplo.setMaximumSize(ejemplo_container_size, ejemplo_container_size)
+        else:
+            # Para resoluciones mayores: tamaño más generoso
+            ejemplo_container_size = 280
+            self.label_ejemplo.setMinimumSize(ejemplo_container_size, ejemplo_container_size)
+            self.label_ejemplo.setMaximumSize(ejemplo_container_size, ejemplo_container_size)
+        
+        # Configurar para que escale el contenido apropiadamente
         self.label_ejemplo.setAlignment(Qt.AlignCenter)
+        self.label_ejemplo.setScaledContents(False)  # No escalar automáticamente el contenido
+        self.label_ejemplo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.label_ejemplo.setStyleSheet("""
             QLabel {
                 border: 2px dashed #dee2e6;
@@ -1066,38 +1487,54 @@ class ClasificadorImagenes(QMainWindow):
         
         # Label del progreso (texto a la izquierda)
         self.label_progreso = QLabel()
-        self.label_progreso.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
+        # Ajustar tamaño de progreso según resolución
+        if self.screen_height <= 800:
+            progress_font_size = "11px"
+            progress_padding = "2px 0px"
+        else:
+            progress_font_size = "14px"
+            progress_padding = "2px 0px"
+            
+        self.label_progreso.setStyleSheet(f"""
+            QLabel {{
+                font-size: {progress_font_size};
                 font-weight: 600;
                 color: #495057;
                 background: none;
                 border: none;
-                padding: 2px 0px;
-            }
+                padding: {progress_padding};
+            }}
         """)
         self.label_progreso.setAlignment(Qt.AlignLeft)
         progress_container.addWidget(self.label_progreso)
         
         # Barra de progreso visual (más sutil)
         self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
+        # Ajustar tamaño de barra de progreso según resolución
+        if self.screen_height <= 800:
+            progress_bar_height = "6px"  # Reducido de 10px a 6px para dar más espacio a imagen de ejemplo
+            progress_bar_font = "7px"   # Fuente más pequeña
+        else:
+            progress_bar_height = "12px"
+            progress_bar_font = "10px"
+            
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
                 border: 1px solid #e9ecef;
                 border-radius: 4px;
                 background-color: #f8f9fa;
                 text-align: center;
-                font-size: 10px;
+                font-size: {progress_bar_font};
                 font-weight: 400;
                 color: #6c757d;
-                height: 12px;
-            }
-            QProgressBar::chunk {
+                height: {progress_bar_height};
+            }}
+            QProgressBar::chunk {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                            stop:0 #e3f2fd, stop:0.5 #bbdefb, stop:1 #90caf9);
                 border-radius: 3px;
                 margin: 1px;
-            }
+            }}
         """)
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(100)
@@ -1121,17 +1558,25 @@ class ClasificadorImagenes(QMainWindow):
 
         # Label para el nombre de la imagen con estilo moderno
         self.label_nombre_imagen = QLabel()
-        self.label_nombre_imagen.setStyleSheet("""
-            QLabel {
-                font-size: 13px;
+        # Ajustar tamaño de nombre de imagen según resolución
+        if self.screen_height <= 800:
+            name_font_size = "10px"
+            name_padding = "3px 6px"
+        else:
+            name_font_size = "13px"
+            name_padding = "5px 10px"
+            
+        self.label_nombre_imagen.setStyleSheet(f"""
+            QLabel {{
+                font-size: {name_font_size};
                 color: #6c757d;
                 background: none;
                 border: none;
                 font-family: 'Courier New', monospace;
-                padding: 5px 10px;
+                padding: {name_padding};
                 background-color: #f8f9fa;
                 border-radius: 6px;
-            }
+            }}
         """)
         self.label_nombre_imagen.setAlignment(Qt.AlignRight)
         bottom_layout.addWidget(self.label_nombre_imagen)
@@ -1144,11 +1589,23 @@ class ClasificadorImagenes(QMainWindow):
             self.close()
             return
 
+        # Verificar que la imagen actual existe
+        imagen_nombre = self.imagenes[self.imagen_actual_index]
+        imagen_path = os.path.join('photos', imagen_nombre)
+        
+        if not os.path.exists(imagen_path):
+            # Si la imagen actual no existe, buscar la siguiente válida
+            if self.imagen_actual_index < len(self.imagenes) - 1:
+                self.buscar_imagen_siguiente_valida()
+            else:
+                self.buscar_imagen_anterior_valida()
+            return
+
         # Limpiar el campo de entrada ANTES de cualquier otra operación
         self.entrada.blockSignals(True)
         self.entrada.clear()
         self.entrada.setText("")  # Forzar texto vacío
-        self.entrada.clear_example_image()  # Limpiar imagen de ejemplo al cargar nueva imagen
+        # NO limpiar la imagen de ejemplo automáticamente - mantener la última mostrada
         self.entrada.blockSignals(False)
 
         # Actualizar etiqueta de progreso con iconos
@@ -1172,43 +1629,70 @@ class ClasificadorImagenes(QMainWindow):
         self.btn_siguiente.setEnabled(self.imagen_actual_index < len(self.imagenes) - 1)
 
         # Cargar y mostrar imagen
-        imagen_nombre = self.imagenes[self.imagen_actual_index]
-        imagen_path = os.path.join('photos', imagen_nombre)
+        imagen = Image.open(imagen_path)
         
         # Mostrar el nombre de la imagen
         self.label_nombre_imagen.setText(imagen_nombre)
-        imagen = Image.open(imagen_path)
         
         # Guardar tamaño original
         original_size = imagen.size
+        original_width, original_height = original_size
 
-        # Ajustar el tamaño del contenedor si la imagen es más pequeña
-        if original_size[0] < self.image_size[0] and original_size[1] < self.image_size[1]:
-            # La imagen es más pequeña que el tamaño mínimo, ajustar el contenedor
-            self.label_imagen.setMinimumSize(QSize(original_size[0], original_size[1]))
-            self.label_imagen.setMaximumSize(QSize(original_size[0], original_size[1]))
-            # Ajustar el contenedor izquierdo
-            left_container = self.label_imagen.parent()
-            left_container.setFixedWidth(original_size[0])
-        else:
-            # La imagen es más grande, usar el tamaño predefinido
-            self.label_imagen.setMinimumSize(QSize(self.image_size[0], self.image_size[1]))
-            self.label_imagen.setMaximumSize(QSize(self.image_size[0], self.image_size[1]))
-            # Restaurar el tamaño del contenedor izquierdo
-            left_container = self.label_imagen.parent()
-            left_container.setFixedWidth(self.container_width)
+        # Establecer tamaño mínimo para las imágenes basado en el espacio real disponible
+        # Los contenedores ahora se adaptan al espacio de la ventana
+        # No establecer tamaño fijo, permitir que se adapten al contenedor
 
-        # Redimensionar imagen manteniendo proporción
-        display_size = self.image_size
-        imagen.thumbnail(display_size, Image.LANCZOS)
-        
         # Convertir imagen de PIL a QPixmap
         imagen_path_temp = "temp_image.png"
         imagen.save(imagen_path_temp)
         pixmap = QPixmap(imagen_path_temp)
         
-        # Mostrar imagen original
-        self.label_imagen.setPixmap(pixmap)
+        # Obtener dimensiones reales del contenedor disponible
+        # Usar el tamaño actual del label que se adapta al contenedor
+        container_width = self.label_imagen.width() if self.label_imagen.width() > 0 else self.image_size[0]
+        container_height = self.label_imagen.height() if self.label_imagen.height() > 0 else self.image_size[1]
+        
+        # Calcular el factor de escala inteligente
+        # Ajustar imagen al contenedor pero NUNCA reducir por debajo de un tamaño mínimo útil
+        scale_factor_width = container_width / original_width
+        scale_factor_height = container_height / original_height
+        
+        # Usar el factor más pequeño para mantener proporciones
+        scale_factor = min(scale_factor_width, scale_factor_height)
+        
+        # Definir tamaño mínimo útil (imagen debe ser al menos de 300px en la dimensión menor)
+        min_useful_size = 300
+        min_scale_width = min_useful_size / original_width
+        min_scale_height = min_useful_size / original_height
+        min_scale = max(min_scale_width, min_scale_height)
+        
+        # Usar el mayor entre el factor calculado y el mínimo útil
+        # Esto permite reducir imágenes muy grandes pero mantiene un tamaño mínimo útil
+        scale_factor = max(scale_factor, min_scale)
+        
+        # Si la imagen original es pequeña, permitir agrandarla hasta llenar el contenedor
+        if scale_factor > 1.0:
+            # Para imágenes pequeñas, limitar el escalado máximo a 3x para evitar pixelación excesiva
+            scale_factor = min(scale_factor, 3.0)
+        
+        # Calcular el nuevo tamaño manteniendo la proporción
+        new_width = int(original_width * scale_factor)
+        new_height = int(original_height * scale_factor)
+        
+        # Debug: mostrar información del escalado y espacio disponible
+        print(f"Imagen: {imagen_nombre}")
+        print(f"Tamaño original: {original_width}x{original_height}")
+        print(f"Tamaño contenedor real: {container_width}x{container_height}")
+        print(f"Tamaño contenedor configurado: {self.image_size[0]}x{self.image_size[1]}")
+        print(f"Factor de escala: {scale_factor:.2f}")
+        print(f"Tamaño final: {new_width}x{new_height}")
+        print("---")
+        
+        # Escalar el pixmap al tamaño calculado
+        scaled_pixmap = pixmap.scaled(new_width, new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        
+        # Mostrar imagen escalada
+        self.label_imagen.setPixmap(scaled_pixmap)
         self.label_imagen.set_bbox(None, original_size)  # Establecer original_size incluso si no hay bbox
         
         # Establecer bounding box si existe
@@ -1230,24 +1714,57 @@ class ClasificadorImagenes(QMainWindow):
             # Recortar la imagen
             imagen_recortada = imagen_original.crop((crop_x1, crop_y1, crop_x2, crop_y2))
             
-            # Calcular el factor de escala para que la imagen recortada ocupe todo el espacio disponible
+            # Calcular dimensiones del recorte para original_size
             crop_width = crop_x2 - crop_x1
             crop_height = crop_y2 - crop_y1
-            scale_x = display_size[0] / crop_width
-            scale_y = display_size[1] / crop_height
-            scale_factor = min(scale_x, scale_y)
             
-            # Aplicar el zoom
-            new_size = (
-                int(crop_width * scale_factor),
-                int(crop_height * scale_factor)
-            )
-            imagen_recortada = imagen_recortada.resize(new_size, Image.LANCZOS)
-            
-            # Guardar y mostrar imagen recortada
+            # Guardar imagen recortada y escalar al tamaño del contenedor
             imagen_recortada.save("temp_zoom.png")
             pixmap_zoom = QPixmap("temp_zoom.png")
-            self.label_zoom.setPixmap(pixmap_zoom)
+            
+            # Obtener dimensiones reales del contenedor de zoom disponible
+            zoom_container_width = self.label_zoom.width() if self.label_zoom.width() > 0 else self.image_size[0]
+            zoom_container_height = self.label_zoom.height() if self.label_zoom.height() > 0 else self.image_size[1]
+            
+            # Obtener dimensiones de la imagen recortada
+            zoom_original_width = imagen_recortada.size[0]  # Usar PIL para obtener tamaño real
+            zoom_original_height = imagen_recortada.size[1]
+            
+            # Calcular el factor de escala inteligente para zoom
+            # Ajustar imagen al contenedor pero mantener calidad visual
+            zoom_scale_factor_width = zoom_container_width / zoom_original_width
+            zoom_scale_factor_height = zoom_container_height / zoom_original_height
+            zoom_scale_factor = min(zoom_scale_factor_width, zoom_scale_factor_height)
+            
+            # Para zoom, permitir reducción pero mantener un tamaño mínimo útil
+            min_zoom_size = 200  # Tamaño mínimo para zoom (más pequeño que imagen principal)
+            min_zoom_scale_width = min_zoom_size / zoom_original_width
+            min_zoom_scale_height = min_zoom_size / zoom_original_height
+            min_zoom_scale = max(min_zoom_scale_width, min_zoom_scale_height)
+            
+            # Usar el mayor entre el factor calculado y el mínimo útil
+            zoom_scale_factor = max(zoom_scale_factor, min_zoom_scale)
+            
+            # Si el recorte es pequeño, permitir agrandar hasta llenar el contenedor
+            if zoom_scale_factor > 1.0:
+                # Para zoom, limitar escalado máximo a 4x para mantener detalle
+                zoom_scale_factor = min(zoom_scale_factor, 4.0)
+            
+            # Calcular el nuevo tamaño manteniendo la proporción
+            zoom_new_width = int(zoom_original_width * zoom_scale_factor)
+            zoom_new_height = int(zoom_original_height * zoom_scale_factor)
+            
+            # Debug: mostrar información del zoom
+            print(f"Zoom - Tamaño recortado: {zoom_original_width}x{zoom_original_height}")
+            print(f"Zoom - Contenedor: {zoom_container_width}x{zoom_container_height}")
+            print(f"Zoom - Factor escala: {zoom_scale_factor:.2f}")
+            print(f"Zoom - Tamaño final: {zoom_new_width}x{zoom_new_height}")
+            print("---")
+            
+            # Escalar el pixmap de zoom al tamaño calculado
+            scaled_zoom_pixmap = pixmap_zoom.scaled(zoom_new_width, zoom_new_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            self.label_zoom.setPixmap(scaled_zoom_pixmap)
             self.label_zoom.set_bbox(None, (crop_width, crop_height))  # Establecer original_size para el zoom
         else:
             QMessageBox.warning(self, "Advertencia", f"No se encontró bounding box para la imagen: {imagen_nombre}")
@@ -1283,6 +1800,10 @@ class ClasificadorImagenes(QMainWindow):
         # Guardar la categoría antes de clasificar
         self.entrada.last_category = categoria
         self.clasificar_imagen(categoria)
+        
+        # Mantener la imagen de ejemplo visible después de clasificar
+        if categoria and self.entrada._preview_label:
+            self.entrada.show_example_image(categoria)
 
     def siguiente_imagen(self):
         """Mueve la imagen actual a la carpeta skip y avanza a la siguiente"""
@@ -1354,18 +1875,48 @@ class ClasificadorImagenes(QMainWindow):
 
         self.imagen_actual_index += 1
         self.mostrar_imagen_actual()
+        
+        # Mantener la imagen de ejemplo visible después de clasificar
+        if categoria and self.entrada._preview_label:
+            self.entrada.show_example_image(categoria)
 
     def imagen_anterior(self):
         """Navega a la imagen anterior"""
         if self.imagen_actual_index > 0:
-            self.imagen_actual_index -= 1
-            self.mostrar_imagen_actual()
+            # Verificar que la imagen anterior existe antes de navegar
+            imagen_anterior_index = self.imagen_actual_index - 1
+            if imagen_anterior_index < len(self.imagenes):
+                imagen_anterior_nombre = self.imagenes[imagen_anterior_index]
+                imagen_anterior_path = os.path.join('photos', imagen_anterior_nombre)
+                
+                if os.path.exists(imagen_anterior_path):
+                    self.imagen_actual_index = imagen_anterior_index
+                    self.mostrar_imagen_actual()
+                else:
+                    # Si la imagen anterior no existe, buscar la anterior válida
+                    self.buscar_imagen_anterior_valida()
+            else:
+                self.imagen_actual_index = imagen_anterior_index
+                self.mostrar_imagen_actual()
 
     def imagen_siguiente(self):
         """Navega a la imagen siguiente"""
         if self.imagen_actual_index < len(self.imagenes) - 1:
-            self.imagen_actual_index += 1
-            self.mostrar_imagen_actual()
+            # Verificar que la imagen siguiente existe antes de navegar
+            imagen_siguiente_index = self.imagen_actual_index + 1
+            if imagen_siguiente_index < len(self.imagenes):
+                imagen_siguiente_nombre = self.imagenes[imagen_siguiente_index]
+                imagen_siguiente_path = os.path.join('photos', imagen_siguiente_nombre)
+                
+                if os.path.exists(imagen_siguiente_path):
+                    self.imagen_actual_index = imagen_siguiente_index
+                    self.mostrar_imagen_actual()
+                else:
+                    # Si la imagen siguiente no existe, buscar la siguiente válida
+                    self.buscar_imagen_siguiente_valida()
+            else:
+                self.imagen_actual_index = imagen_siguiente_index
+                self.mostrar_imagen_actual()
 
     def actualizar_estadisticas(self):
         """Actualiza las estadísticas de clasificación de forma aesthetic y ordenada"""
@@ -1393,6 +1944,32 @@ class ClasificadorImagenes(QMainWindow):
             stats_text = total_text
         
         self.stats_label.setText(stats_text)
+
+    def buscar_imagen_anterior_valida(self):
+        """Busca la imagen anterior válida que existe en la carpeta photos"""
+        for i in range(self.imagen_actual_index - 1, -1, -1):
+            imagen_nombre = self.imagenes[i]
+            imagen_path = os.path.join('photos', imagen_nombre)
+            if os.path.exists(imagen_path):
+                self.imagen_actual_index = i
+                self.mostrar_imagen_actual()
+                return
+        
+        # Si no se encuentra ninguna imagen anterior válida, mostrar mensaje
+        QMessageBox.information(self, "Información", "No hay imágenes anteriores disponibles.")
+
+    def buscar_imagen_siguiente_valida(self):
+        """Busca la imagen siguiente válida que existe en la carpeta photos"""
+        for i in range(self.imagen_actual_index + 1, len(self.imagenes)):
+            imagen_nombre = self.imagenes[i]
+            imagen_path = os.path.join('photos', imagen_nombre)
+            if os.path.exists(imagen_path):
+                self.imagen_actual_index = i
+                self.mostrar_imagen_actual()
+                return
+        
+        # Si no se encuentra ninguna imagen siguiente válida, mostrar mensaje
+        QMessageBox.information(self, "Información", "No hay imágenes siguientes disponibles.")
 
     def show_classification_dialog(self, bbox):
         """Muestra el diálogo para clasificar el bounding box"""
