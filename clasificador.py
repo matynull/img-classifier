@@ -45,6 +45,15 @@ class AutoCompleteLineEdit(QLineEdit):
             self.nextImageSignal.emit()  # Emitir señal para siguiente imagen
             event.accept()
             return
+        elif event.key() in [Qt.Key_1, Qt.Key_2, Qt.Key_3, Qt.Key_4, Qt.Key_5]:
+            # Manejar keybinds del 1 al 5 para especies más frecuentes
+            parent = self.parent()
+            while parent and not isinstance(parent, ClasificadorImagenes):
+                parent = parent.parent()
+            if parent:
+                parent.handle_keybind(event.key())
+            event.accept()
+            return
         elif event.key() == Qt.Key_Left or event.key() == Qt.Key_Right:
             # Pasar eventos de flechas al widget principal
             parent = self.parent()
@@ -600,6 +609,190 @@ class ClassificationDialog(QDialog):
             return
         super().accept()
 
+class ClickableKeybindWidget(QWidget):
+    """Widget clickeable para keybinds que permite binding manual"""
+    
+    keybindClicked = pyqtSignal(int)  # Señal que emite el índice del keybind clickeado
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(80)  # Altura mínima más grande
+        
+    def create_keybind_layout(self, main_window):
+        """Crear layout de keybinds con botones clickeables"""
+        layout = QVBoxLayout()
+        # Ajustar espaciado según resolución para reducir altura total
+        if main_window.screen_height <= 800:
+            layout.setSpacing(4)  # Espaciado reducido para 720p
+            layout.setContentsMargins(6, 4, 6, 4)  # Márgenes reducidos para 720p
+        else:
+            layout.setSpacing(8)
+            layout.setContentsMargins(8, 8, 8, 8)
+        
+        # Título y botón reset
+        header_layout = QHBoxLayout()
+        
+        title = QLabel("⌨️ Keybinds")  # Título más corto
+        # Ajustar tamaño del título según resolución
+        if main_window.screen_height <= 800:
+            title_font_size = "11px"  # Más pequeño para 720p
+        else:
+            title_font_size = "14px"
+            
+        title.setStyleSheet(f"""
+            QLabel {{
+                font-size: {title_font_size};
+                font-weight: 600;
+                color: #495057;
+                background: none;
+                border: none;
+            }}
+        """)
+        title.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(title)
+        
+        # Botón reset
+        reset_btn = QPushButton("🔄")
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+                max-width: 30px;
+                max-height: 25px;
+            }
+            QPushButton:hover {
+                background-color: #545b62;
+            }
+            QPushButton:pressed {
+                background-color: #495057;
+            }
+        """)
+        reset_btn.setToolTip("Resetear keybinds")
+        reset_btn.clicked.connect(main_window.reset_keybinds)
+        header_layout.addWidget(reset_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Layout horizontal para los keybinds
+        keybinds_layout = QHBoxLayout()
+        # Ajustar espaciado según resolución
+        if main_window.screen_height <= 800:
+            keybinds_layout.setSpacing(4)  # Espaciado reducido para 720p
+        else:
+            keybinds_layout.setSpacing(8)
+        
+        # Crear 5 botones para keybinds
+        self.keybind_buttons = []
+        for i in range(5):
+            btn = QPushButton()
+            # Ajustar tamaño según resolución - tamaño optimizado para 1366x768
+            if main_window.screen_height <= 800:
+                btn.setMinimumSize(110, 55)  # Tamaño aumentado para 1366x768
+            else:
+                btn.setMinimumSize(120, 60)  # Tamaño normal para otras resoluciones
+            btn.clicked.connect(lambda checked, idx=i: (
+                print(f"DEBUG: Botón {idx} clickeado, emitiendo señal"),
+                self.keybindClicked.emit(idx)
+            )[-1])
+            btn.setCursor(Qt.PointingHandCursor)
+            self.keybind_buttons.append(btn)
+            keybinds_layout.addWidget(btn)
+        
+        layout.addLayout(keybinds_layout)
+        
+        # Conectar señal
+        print(f"DEBUG: Conectando keybindClicked signal a {main_window}")  # Debug
+        self.keybindClicked.connect(main_window.on_keybind_clicked)
+        print("DEBUG: Signal conectado correctamente")  # Debug
+        
+        return layout
+    
+    def update_keybind_display(self, keybind_slots, clasificacion_stats, screen_height):
+        """Actualizar la visualización de los keybinds"""
+        print(f"DEBUG: Actualizando display con slots: {keybind_slots}")  # Debug
+        print(f"DEBUG: Stats disponibles: {clasificacion_stats}")  # Debug
+        
+        # Ajustar tamaño de fuente según resolución
+        if screen_height <= 800:
+            key_font_size = "12px"
+            text_font_size = "11px"
+            count_font_size = "9px"
+        else:
+            key_font_size = "14px"
+            text_font_size = "13px"
+            count_font_size = "10px"
+        
+        for i, btn in enumerate(self.keybind_buttons):
+            categoria = keybind_slots[i]
+            key_num = i + 1
+            
+            if categoria:  # Si hay una categoría asignada (sin importar si tiene estadísticas)
+                # Obtener el conteo de clasificaciones (0 si no hay estadísticas)
+                count = clasificacion_stats.get(categoria, 0)
+                
+                # Mostrar nombre completo (sin truncar)
+                bg_color = "#e8f5e8"
+                border_color = "#28a745"
+                text_color = "#155724"
+                
+                # Mostrar conteo solo si es mayor a 0
+                if count > 0:
+                    btn.setText(f"[{key_num}]\n{categoria}\n({count})")
+                else:
+                    btn.setText(f"[{key_num}]\n{categoria}\n(Sin usar)")
+                
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {bg_color};
+                        border: 2px solid {border_color};
+                        border-radius: 8px;
+                        color: {text_color};
+                        font-size: {text_font_size};
+                        font-weight: 500;
+                        padding: 8px;
+                        text-align: center;
+                        line-height: 1.2;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #d4e6d4;
+                        border-color: #1e7e34;
+                    }}
+                    QPushButton:pressed {{
+                        background-color: #c3d9c3;
+                    }}
+                """)
+            else:
+                # Slot vacío
+                bg_color = "#f8f9fa"
+                border_color = "#dee2e6"
+                text_color = "#6c757d"
+                
+                btn.setText(f"[{key_num}]\nVacío\n(Click para asignar)")
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {bg_color};
+                        border: 2px dashed {border_color};
+                        border-radius: 8px;
+                        color: {text_color};
+                        font-size: {text_font_size};
+                        font-weight: 500;
+                        padding: 8px;
+                        text-align: center;
+                        line-height: 1.2;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #e9ecef;
+                        border-color: #adb5bd;
+                    }}
+                    QPushButton:pressed {{
+                        background-color: #dee2e6;
+                    }}
+                """)
+
 class ClasificadorImagenes(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -693,6 +886,10 @@ class ClasificadorImagenes(QMainWindow):
         # Variables para estadísticas
         self.clasificacion_stats = {}  # Diccionario para contar clasificaciones por categoría
         self.total_clasificadas = 0
+        
+        # Variables para keybinds fijos - slots que no cambian de posición
+        self.keybind_slots = [None, None, None, None, None]  # 5 slots fijos para teclas 1-5
+        self.keybind_history = []  # Historial de categorías usadas para determinar slots
         
         # Crear el widget central
         central_widget = QWidget()
@@ -965,7 +1162,7 @@ class ClasificadorImagenes(QMainWindow):
         # Buscar el label de ayuda y actualizarlo
         for child in self.findChildren(QLabel):
             if "Enter: clasificar" in child.text():
-                child.setText(f"Enter: clasificar | {tecla_nombre}: saltar | ◀ ▶: navegar")
+                child.setText(f"Enter: clasificar | {tecla_nombre}: saltar | ◀ ▶: navegar | 1-5: especies frecuentes")
                 break
 
     def resize_example_image(self, image_path):
@@ -1373,8 +1570,14 @@ class ClasificadorImagenes(QMainWindow):
         self.stats_label.setAlignment(Qt.AlignCenter)
         input_container.addWidget(self.stats_label)
         
+        # Widget clickeable para keybinds (reemplaza el label anterior)
+        self.keybinds_widget = ClickableKeybindWidget()
+        keybind_layout = self.keybinds_widget.create_keybind_layout(self)
+        self.keybinds_widget.setLayout(keybind_layout)
+        input_container.addWidget(self.keybinds_widget)
+        
         # Añadir texto de ayuda
-        help_text = QLabel("Enter: clasificar | Ctrl: saltar | ◀ ▶: navegar")
+        help_text = QLabel("Enter: clasificar | Ctrl: saltar | ◀ ▶: navegar | 1-5: especies frecuentes")
         # Ajustar tamaño de ayuda según resolución
         if self.screen_height <= 800:
             help_font_size = "9px"
@@ -1486,29 +1689,46 @@ class ClasificadorImagenes(QMainWindow):
 
         # Barra de estado inferior moderna
         bottom_widget = QWidget()
-        bottom_widget.setStyleSheet("""
-            QWidget {
+        # Ajustar padding según resolución para reducir altura total
+        if self.screen_height <= 800:
+            bottom_padding = "5px 10px"  # Padding reducido para 720p
+            bottom_margin = "5px"  # Margen superior reducido para 720p
+        else:
+            bottom_padding = "10px 15px"
+            bottom_margin = "10px"
+            
+        bottom_widget.setStyleSheet(f"""
+            QWidget {{
                 background-color: white;
                 border: 1px solid #e9ecef;
                 border-radius: 8px;
-                padding: 10px 15px;
-                margin-top: 10px;
-            }
+                padding: {bottom_padding};
+                margin-top: {bottom_margin};
+            }}
         """)
         bottom_layout = QHBoxLayout(bottom_widget)
-        bottom_layout.setSpacing(15)
-        bottom_layout.setContentsMargins(15, 10, 15, 10)
+        # Ajustar espaciado y márgenes según resolución para reducir altura total
+        if self.screen_height <= 800:
+            bottom_layout.setSpacing(8)  # Espaciado reducido para 720p
+            bottom_layout.setContentsMargins(10, 5, 10, 5)  # Márgenes reducidos para 720p
+        else:
+            bottom_layout.setSpacing(15)
+            bottom_layout.setContentsMargins(15, 10, 15, 10)
 
         # Barra de progreso visual (aesthetic)
         progress_container = QVBoxLayout()
-        progress_container.setSpacing(5)
+        # Ajustar espaciado según resolución para reducir altura total
+        if self.screen_height <= 800:
+            progress_container.setSpacing(2)  # Espaciado reducido para 720p
+        else:
+            progress_container.setSpacing(5)
         
         # Label del progreso (texto a la izquierda)
         self.label_progreso = QLabel()
         # Ajustar tamaño de progreso según resolución
         if self.screen_height <= 800:
-            progress_font_size = "11px"
-            progress_padding = "2px 0px"
+            progress_font_size = "10px"  # Fuente más pequeña para 720p
+            progress_padding = "1px 0px"  # Padding reducido para 720p
         else:
             progress_font_size = "14px"
             progress_padding = "2px 0px"
@@ -1563,13 +1783,19 @@ class ClasificadorImagenes(QMainWindow):
 
         # Separador visual
         separator = QLabel("|")
-        separator.setStyleSheet("""
-            QLabel {
+        # Ajustar tamaño del separador según resolución
+        if self.screen_height <= 800:
+            separator_font_size = "12px"  # Separador más pequeño para 720p
+        else:
+            separator_font_size = "16px"
+            
+        separator.setStyleSheet(f"""
+            QLabel {{
                 color: #dee2e6;
-                font-size: 16px;
+                font-size: {separator_font_size};
                 background: none;
                 border: none;
-            }
+            }}
         """)
         separator.setAlignment(Qt.AlignCenter)
         bottom_layout.addWidget(separator)
@@ -1578,8 +1804,8 @@ class ClasificadorImagenes(QMainWindow):
         self.label_nombre_imagen = QLabel()
         # Ajustar tamaño de nombre de imagen según resolución
         if self.screen_height <= 800:
-            name_font_size = "10px"
-            name_padding = "3px 6px"
+            name_font_size = "9px"  # Fuente más pequeña para 720p
+            name_padding = "2px 4px"  # Padding reducido para 720p
         else:
             name_font_size = "13px"
             name_padding = "5px 10px"
@@ -1660,10 +1886,14 @@ class ClasificadorImagenes(QMainWindow):
         # Los contenedores ahora se adaptan al espacio de la ventana
         # No establecer tamaño fijo, permitir que se adapten al contenedor
 
-        # Convertir imagen de PIL a QPixmap
-        imagen_path_temp = "temp_image.png"
-        imagen.save(imagen_path_temp)
-        pixmap = QPixmap(imagen_path_temp)
+        # Convertir imagen de PIL a QPixmap directamente en memoria
+        # Usar BytesIO para evitar archivos temporales
+        from io import BytesIO
+        buffer = BytesIO()
+        imagen.save(buffer, format='PNG')
+        buffer.seek(0)
+        pixmap = QPixmap()
+        pixmap.loadFromData(buffer.getvalue())
         
         # Forzar actualización del layout para obtener dimensiones reales de los contenedores
         # Esto es especialmente importante para la primera imagen
@@ -1763,9 +1993,13 @@ class ClasificadorImagenes(QMainWindow):
             crop_width = crop_x2 - crop_x1
             crop_height = crop_y2 - crop_y1
             
-            # Guardar imagen recortada y escalar al tamaño del contenedor
-            imagen_recortada.save("temp_zoom.png")
-            pixmap_zoom = QPixmap("temp_zoom.png")
+            # Guardar imagen recortada en memoria y convertir a QPixmap
+            # Usar BytesIO para evitar archivos temporales
+            zoom_buffer = BytesIO()
+            imagen_recortada.save(zoom_buffer, format='PNG')
+            zoom_buffer.seek(0)
+            pixmap_zoom = QPixmap()
+            pixmap_zoom.loadFromData(zoom_buffer.getvalue())
             
             # Obtener dimensiones reales del contenedor de zoom disponible
             zoom_container_width = self.label_zoom.width()
@@ -1821,8 +2055,6 @@ class ClasificadorImagenes(QMainWindow):
             self.label_zoom.setPixmap(QPixmap())  # Limpiar imagen de zoom
             self.label_zoom.set_bbox(None, None)  # Limpiar bbox y original_size
         
-        os.remove(imagen_path_temp)
-        
         # Dar foco al campo de entrada
         self.entrada.setFocus()
 
@@ -1834,6 +2066,9 @@ class ClasificadorImagenes(QMainWindow):
         elif event.key() == Qt.Key_Right:
             # Tecla derecha - imagen siguiente
             self.imagen_siguiente()
+        elif event.key() in [Qt.Key_1, Qt.Key_2, Qt.Key_3, Qt.Key_4, Qt.Key_5]:
+            # Manejar keybinds del 1 al 5 para especies más frecuentes
+            self.handle_keybind(event.key())
         else:
             # Pasar el evento al handler por defecto
             super().keyPressEvent(event)
@@ -1854,6 +2089,26 @@ class ClasificadorImagenes(QMainWindow):
         # Mantener la imagen de ejemplo visible después de clasificar
         if categoria and self.entrada._preview_label:
             self.entrada.show_example_image(categoria)
+
+    def handle_keybind(self, key):
+        """Manejar keybinds del 1 al 5 usando slots fijos"""
+        # Mapear teclas a índices de slots
+        key_map = {
+            Qt.Key_1: 0,
+            Qt.Key_2: 1, 
+            Qt.Key_3: 2,
+            Qt.Key_4: 3,
+            Qt.Key_5: 4
+        }
+        
+        index = key_map.get(key)
+        if index is not None and index < len(self.keybind_slots):
+            categoria = self.keybind_slots[index]
+            if categoria and categoria in self.categorias:
+                # Establecer la categoría en el campo de entrada
+                self.entrada.setText(categoria)
+                # Procesar clasificación inmediatamente
+                self.procesar_clasificacion()
 
     def siguiente_imagen(self):
         """Mueve la imagen actual a la carpeta skip y avanza a la siguiente"""
@@ -1972,6 +2227,7 @@ class ClasificadorImagenes(QMainWindow):
         """Actualiza las estadísticas de clasificación de forma aesthetic y ordenada"""
         if not self.clasificacion_stats:
             self.stats_label.setText("📋 Aún no hay clasificaciones realizadas")
+            self.actualizar_keybinds()  # Actualizar keybinds también
             return
         
         # Obtener top 3 categorías más clasificadas
@@ -1994,6 +2250,118 @@ class ClasificadorImagenes(QMainWindow):
             stats_text = total_text
         
         self.stats_label.setText(stats_text)
+        self.actualizar_keybinds()  # Actualizar keybinds después de estadísticas
+
+    def actualizar_keybinds(self, auto_fill=True):
+        """Actualiza la información de keybinds mostrada al usuario con slots fijos"""
+        if not hasattr(self, 'keybinds_widget'):
+            return
+        
+        # Actualizar slots basado en categorías más usadas (llenado dinámico hasta 5)
+        # Solo hacer llenado automático si auto_fill es True
+        if auto_fill:
+            self.actualizar_slots_keybinds()
+        
+        # Actualizar la visualización del widget
+        self.keybinds_widget.update_keybind_display(
+            self.keybind_slots, 
+            self.clasificacion_stats, 
+            self.screen_height
+        )
+    
+    def actualizar_slots_keybinds(self):
+        """Actualizar slots de keybinds manteniendo posiciones fijas - llenado dinámico"""
+        # Obtener top categorías ordenadas por frecuencia
+        top_categorias = sorted(self.clasificacion_stats.items(), key=lambda x: x[1], reverse=True)
+        
+        # Para cada categoría frecuente, asignar a un slot si no tiene uno ya
+        for categoria, count in top_categorias:
+            if categoria not in self.keybind_slots:
+                # Buscar primer slot vacío
+                for i in range(5):
+                    if self.keybind_slots[i] is None:
+                        self.keybind_slots[i] = categoria
+                        break
+                        
+    def on_keybind_clicked(self, slot_index):
+        """Manejar click en un slot de keybind para binding manual"""
+        print(f"DEBUG: Click detectado en slot {slot_index}")  # Debug
+        from PyQt5.QtWidgets import QInputDialog
+        
+        current_category = self.keybind_slots[slot_index]
+        
+        # Crear diálogo para seleccionar categoría
+        items = ["(Vacío)"] + self.categorias
+        
+        # Determinar el índice actual
+        current_index = 0
+        if current_category and current_category in self.categorias:
+            current_index = self.categorias.index(current_category) + 1  # +1 por "(Vacío)"
+        
+        print(f"DEBUG: Mostrando diálogo con {len(items)} opciones")  # Debug
+        selected, ok = QInputDialog.getItem(
+            self, 
+            f"Asignar Keybind [{slot_index + 1}]",
+            f"Selecciona la especie para la tecla {slot_index + 1}:",
+            items,
+            current_index,
+            False
+        )
+        
+        print(f"DEBUG: Resultado del diálogo: selected='{selected}', ok={ok}")  # Debug
+        
+        if ok:
+            if selected == "(Vacío)":
+                # Limpiar el slot
+                self.keybind_slots[slot_index] = None
+            elif selected in self.categorias:
+                # Verificar si la categoría ya está asignada a otro slot
+                for i, existing_cat in enumerate(self.keybind_slots):
+                    if existing_cat == selected and i != slot_index:
+                        # Intercambiar las asignaciones
+                        self.keybind_slots[i] = current_category
+                        break
+                
+                # Asignar la nueva categoría
+                self.keybind_slots[slot_index] = selected
+            
+            # Actualizar la visualización de forma explícita
+            self.actualizar_keybinds()
+            
+            # Forzar actualización visual del widget
+            self.keybinds_widget.update()
+            QApplication.processEvents()  # Procesar eventos pendientes
+            
+            print(f"DEBUG: Keybind slots actualizados: {self.keybind_slots}")  # Debug
+            
+    def reset_keybinds(self):
+        """Resetear todos los keybinds"""
+        reply = QMessageBox.question(
+            self, 
+            "Resetear Keybinds", 
+            "¿Estás seguro de que quieres resetear todos los keybinds?\nTodos los slots quedarán vacíos para asignación manual.",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Limpiar todos los slots
+            self.keybind_slots = [None, None, None, None, None]
+            
+            # Actualizar la visualización SIN rellenar automáticamente
+            self.actualizar_keybinds(auto_fill=False)
+            
+            QMessageBox.information(
+                self, 
+                "Keybinds Reseteados", 
+                "Los keybinds han sido reseteados. Usa click en los botones para asignar manualmente."
+            )
+            
+            # Procesar eventos pendientes para asegurar que los diálogos se cierren correctamente
+            QApplication.processEvents()
+            
+            # Restaurar el foco al widget principal para asegurar que las teclas del sistema funcionen
+            self.setFocus()
+            self.entrada.setFocus()
 
     def buscar_imagen_anterior_valida(self):
         """Busca la imagen anterior válida que existe en la carpeta photos"""
